@@ -9,6 +9,100 @@ type Numeric interface {
 		~float32 | ~float64
 }
 
+// MaxValue returns the maximum representable value for any numeric type.
+func MaxValue[T Numeric]() T {
+	switch any(*new(T)).(type) {
+	case int:
+		v := int(^uint(0) >> 1)
+		return any(v).(T)
+	case int8:
+		v := int8(math.MaxInt8)
+		return any(v).(T)
+	case int16:
+		v := int16(math.MaxInt16)
+		return any(v).(T)
+	case int32:
+		v := int32(math.MaxInt32)
+		return any(v).(T)
+	case int64:
+		v := int64(math.MaxInt64)
+		return any(v).(T)
+	case uint:
+		v := ^uint(0)
+		return any(v).(T)
+	case uint8:
+		v := uint8(math.MaxUint8)
+		return any(v).(T)
+	case uint16:
+		v := uint16(math.MaxUint16)
+		return any(v).(T)
+	case uint32:
+		v := uint32(math.MaxUint32)
+		return any(v).(T)
+	case uint64:
+		v := uint64(math.MaxUint64)
+		return any(v).(T)
+	case uintptr:
+		v := ^uintptr(0)
+		return any(v).(T)
+	case float32:
+		v := float32(math.MaxFloat32)
+		return any(v).(T)
+	case float64:
+		v := float64(math.MaxFloat64)
+		return any(v).(T)
+	default:
+		panic("foundation.MaxValue: unsupported type")
+	}
+}
+
+// MinValue returns the minimum representable value for any numeric type.
+func MinValue[T Numeric]() T {
+	switch any(*new(T)).(type) {
+	case int:
+		v := -int(^uint(0)>>1) - 1
+		return any(v).(T)
+	case int8:
+		v := int8(math.MinInt8)
+		return any(v).(T)
+	case int16:
+		v := int16(math.MinInt16)
+		return any(v).(T)
+	case int32:
+		v := int32(math.MinInt32)
+		return any(v).(T)
+	case int64:
+		v := int64(math.MinInt64)
+		return any(v).(T)
+	case uint:
+		v := uint(0)
+		return any(v).(T)
+	case uint8:
+		v := uint8(0)
+		return any(v).(T)
+	case uint16:
+		v := uint16(0)
+		return any(v).(T)
+	case uint32:
+		v := uint32(0)
+		return any(v).(T)
+	case uint64:
+		v := uint64(0)
+		return any(v).(T)
+	case uintptr:
+		v := uintptr(0)
+		return any(v).(T)
+	case float32:
+		v := float32(-math.MaxFloat32)
+		return any(v).(T)
+	case float64:
+		v := -math.MaxFloat64
+		return any(v).(T)
+	default:
+		panic("foundation.MinValue: unsupported type")
+	}
+}
+
 // Sqrt returns the square root of any numeric, automatically choosing
 // the most efficient method of computation. It keeps the exact precision
 // and type of the numeric.
