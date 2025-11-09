@@ -69,3 +69,15 @@ func BenchmarkWithMetrics[data any](
 
 	fmt.Fprintf(os.Stderr, "✅ Finished %s\n", name)
 }
+
+func BenchmarkSetup[data any](
+	b *testing.B,
+	testVariant, testConfiguration string,
+	prepareFn func(b *testing.B) data,
+	testFn func(data data, b *testing.B),
+	cleanupFn func(data data, b *testing.B),
+) {
+	b.Run(testConfiguration+"/"+testVariant, func(b *testing.B) {
+		BenchmarkWithMetrics(b, prepareFn, testFn, cleanupFn)
+	})
+}
