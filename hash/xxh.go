@@ -134,6 +134,14 @@ func XXH3HasherHash64(hasher *XXH3Hasher, content []byte) uint64 {
 	}
 }
 
+//go:nosplit
+//go:inline
+func XXH3HasherHash64View[T any](hasher *XXH3Hasher, mark memcore.MarkRaw) uint64 {
+	ptr, length := memcore.MemcoreView[T](mark)
+	data := unsafe.Slice((*byte)(ptr), length)
+	return XXH3HasherHash64(hasher, data)
+}
+
 func XXH3HasherHash128(hasher *XXH3Hasher, content []byte) (uint64, uint64) {
 	contentLength := len(content)
 
@@ -181,6 +189,14 @@ func XXH3HasherHash128(hasher *XXH3Hasher, content []byte) (uint64, uint64) {
 		xxh3HasherAccumulateAll(hasher, accumulator, content, uint64(contentLength), secret)
 		return xxh3HasherFinalize(hasher, accumulator, uint64(contentLength)*prime64_1, 11, secret), xxh3HasherFinalize(hasher, accumulator, ^(uint64(contentLength) * prime64_2), secretLength-75, secret)
 	}
+}
+
+//go:nosplit
+//go:inline
+func XXH3HasherHash128View[T any](hasher *XXH3Hasher, mark memcore.MarkRaw) (uint64, uint64) {
+	ptr, length := memcore.MemcoreView[T](mark)
+	data := unsafe.Slice((*byte)(ptr), length)
+	return XXH3HasherHash128(hasher, data)
 }
 
 // ------------------------------------------------------- PRIVATE HELPERS

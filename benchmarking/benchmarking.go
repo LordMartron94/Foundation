@@ -26,15 +26,17 @@ func BenchmarkWithMetrics[data any](
 	runtime.GC()
 
 	var panicValue any
+	var panicStack []byte
+
 	var before, after runtime.MemStats
 	b.ResetTimer()
-
 	runtime.ReadMemStats(&before)
 
 	func() {
 		defer func() {
 			if r := recover(); r != nil {
 				panicValue = r
+				panicStack = debug.Stack()
 			}
 		}()
 		testFn(preparedData, b)
@@ -53,6 +55,9 @@ func BenchmarkWithMetrics[data any](
 
 	if panicValue != nil {
 		fmt.Fprintf(os.Stderr, "\n🔥 Benchmark panic in %s: %v\n", name, panicValue)
+		if len(panicStack) > 0 {
+			fmt.Fprintf(os.Stderr, "Stack trace:\n%s\n", panicStack)
+		}
 		os.Exit(1)
 	}
 
