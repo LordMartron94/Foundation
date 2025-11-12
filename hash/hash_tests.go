@@ -15,9 +15,11 @@ func TestHash(t *testing.T) {
 	hasher := XXH3HasherCreateWithSeed(42)
 
 	cpu.X86.HasAVX2 = false
+	XXH3HasherReinitialize()
 	gotScalar := XXH3HasherHash64(hasher, data)
 
 	cpu.X86.HasAVX2 = true
+	XXH3HasherReinitialize()
 	gotAVX2 := XXH3HasherHash64(hasher, data)
 
 	success := fmt.Sprintf("Hash is the same: %x", gotScalar)

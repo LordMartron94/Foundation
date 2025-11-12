@@ -26,6 +26,11 @@ const (
 	prime_mx2 uint64 = 0x9FB21C651E98DF25
 )
 
+var xxh3DefaultAccumulator = [8]uint64{
+	prime32_3, prime64_1, prime64_2, prime64_3,
+	prime64_4, prime32_2, prime64_5, prime32_1,
+}
+
 var (
 	defaultHashSecret []uint8 = []uint8{
 		0xb8, 0xfe, 0x6c, 0x39, 0x23, 0xa4, 0x4b, 0xbe,
@@ -56,6 +61,24 @@ var (
 
 	defaultHashSeed uint64 = 0
 )
+
+var (
+	accumulatorFunc xxh3AccumulateFunc
+	scramblerFunc   xxh3ScrambleFunc
+)
+
+func init() {
+	accumulatorFunc = xxh3Accumulate512Dispatch()
+	scramblerFunc = xxh3ScrambleAccDispatch()
+}
+
+// XXH3HasherReinitialize resets the initialized variables and retrieved functions.
+// This is useful for benchmarking setups where two different code paths need to be tested.
+// For example, in one case enabling AVX2, in the other disabling it.
+func XXH3HasherReinitialize() {
+	accumulatorFunc = xxh3Accumulate512Dispatch()
+	scramblerFunc = xxh3ScrambleAccDispatch()
+}
 
 // XXH3Hasher is an hasher using XXH3 algorithm according to spec:
 // https://www.ietf.org/archive/id/draft-josefsson-xxhash-00.html#name-xxh3-algorithm-overview
@@ -124,13 +147,10 @@ func XXH3HasherHash64(hasher *XXH3Hasher, content []byte) uint64 {
 		xxh3Hasher64Length129To240(hasher, &accumulator, content, uint64(contentLength), secret)
 		return xxh3HasherAvalanche(accumulator)
 	default:
-		accumulator := &[8]uint64{
-			prime32_3, prime64_1, prime64_2, prime64_3,
-			prime64_4, prime32_2, prime64_5, prime32_1,
-		}
+		accumulator := xxh3DefaultAccumulator
 
-		xxh3HasherAccumulateAll(hasher, accumulator, content, uint64(contentLength), secret)
-		return xxh3HasherFinalize(hasher, accumulator, uint64(contentLength)*prime64_1, 11, secret)
+		xxh3HasherAccumulateAll(hasher, &accumulator, content, uint64(contentLength), secret)
+		return xxh3HasherFinalize(hasher, &accumulator, uint64(contentLength)*prime64_1, 11, secret)
 	}
 }
 
@@ -180,14 +200,11 @@ func XXH3HasherHash128(hasher *XXH3Hasher, content []byte) (uint64, uint64) {
 		high := (accumulator[0] * prime64_1) + (accumulator[1] * prime64_4) + ((uint64(contentLength) - hasher.seed) * prime64_2)
 		return xxh3HasherAvalanche(low), 0 - xxh3HasherAvalanche(high)
 	default:
-		accumulator := &[8]uint64{
-			prime32_3, prime64_1, prime64_2, prime64_3,
-			prime64_4, prime32_2, prime64_5, prime32_1,
-		}
 		secretLength := uint64(len(secret))
+		accumulator := xxh3DefaultAccumulator
 
-		xxh3HasherAccumulateAll(hasher, accumulator, content, uint64(contentLength), secret)
-		return xxh3HasherFinalize(hasher, accumulator, uint64(contentLength)*prime64_1, 11, secret), xxh3HasherFinalize(hasher, accumulator, ^(uint64(contentLength) * prime64_2), secretLength-75, secret)
+		xxh3HasherAccumulateAll(hasher, &accumulator, content, uint64(contentLength), secret)
+		return xxh3HasherFinalize(hasher, &accumulator, uint64(contentLength)*prime64_1, 11, secret), xxh3HasherFinalize(hasher, &accumulator, ^(uint64(contentLength) * prime64_2), secretLength-75, secret)
 	}
 }
 
@@ -517,18 +534,18 @@ func xxh3HasherAccumulateAll(
 			b0 := (*[8]uint64)(unsafe.Pointer(&block[n*64]))
 			b1 := (*[8]uint64)(unsafe.Pointer(&block[(n+1)*64]))
 
-			xxh3Accumulate512Dispatch(acc, b0, s0)
-			xxh3Accumulate512Dispatch(acc, b1, s1)
+			accumulatorFunc(acc, b0, s0)
+			accumulatorFunc(acc, b1, s1)
 		}
 
 		if stripesPerBlock&1 != 0 {
 			n := stripesPerBlock - 1
 			s := (*[8]uint64)(unsafe.Pointer(&secret[n*8]))
 			b := (*[8]uint64)(unsafe.Pointer(&block[n*64]))
-			xxh3Accumulate512Dispatch(acc, b, s)
+			accumulatorFunc(acc, b, s)
 		}
 
-		xxh3ScrambleAccDispatch(acc, sw)
+		scramblerFunc(acc, sw)
 	}
 
 	// ─── Phase 2: last block ───
@@ -540,60 +557,14 @@ func xxh3HasherAccumulateAll(
 		s := (*[8]uint64)(unsafe.Pointer(&secret[n*8]))
 		b := (*[8]uint64)(unsafe.Pointer(&lastBlock[n*64]))
 
-		v0 := b[0] ^ s[0]
-		acc[1] += b[0]
-		acc[0] += uint64(uint32(v0)) * uint64(uint32(v0>>32))
-		v1 := b[1] ^ s[1]
-		acc[0] += b[1]
-		acc[1] += uint64(uint32(v1)) * uint64(uint32(v1>>32))
-		v2 := b[2] ^ s[2]
-		acc[3] += b[2]
-		acc[2] += uint64(uint32(v2)) * uint64(uint32(v2>>32))
-		v3 := b[3] ^ s[3]
-		acc[2] += b[3]
-		acc[3] += uint64(uint32(v3)) * uint64(uint32(v3>>32))
-		v4 := b[4] ^ s[4]
-		acc[5] += b[4]
-		acc[4] += uint64(uint32(v4)) * uint64(uint32(v4>>32))
-		v5 := b[5] ^ s[5]
-		acc[4] += b[5]
-		acc[5] += uint64(uint32(v5)) * uint64(uint32(v5>>32))
-		v6 := b[6] ^ s[6]
-		acc[7] += b[6]
-		acc[6] += uint64(uint32(v6)) * uint64(uint32(v6>>32))
-		v7 := b[7] ^ s[7]
-		acc[6] += b[7]
-		acc[7] += uint64(uint32(v7)) * uint64(uint32(v7>>32))
+		accumulatorFunc(acc, b, s)
 	}
 
 	// ─── Phase 3: final overlapping stripe ───
-	lastStripe := *(*[8]uint64)(unsafe.Pointer(&content[contentLength-64]))
+	lastStripe := (*[8]uint64)(unsafe.Pointer(&content[contentLength-64]))
 	sFinal := (*[8]uint64)(unsafe.Pointer(&secret[secretLength-71]))
 
-	v0 := lastStripe[0] ^ sFinal[0]
-	acc[1] += lastStripe[0]
-	acc[0] += uint64(uint32(v0)) * uint64(uint32(v0>>32))
-	v1 := lastStripe[1] ^ sFinal[1]
-	acc[0] += lastStripe[1]
-	acc[1] += uint64(uint32(v1)) * uint64(uint32(v1>>32))
-	v2 := lastStripe[2] ^ sFinal[2]
-	acc[3] += lastStripe[2]
-	acc[2] += uint64(uint32(v2)) * uint64(uint32(v2>>32))
-	v3 := lastStripe[3] ^ sFinal[3]
-	acc[2] += lastStripe[3]
-	acc[3] += uint64(uint32(v3)) * uint64(uint32(v3>>32))
-	v4 := lastStripe[4] ^ sFinal[4]
-	acc[5] += lastStripe[4]
-	acc[4] += uint64(uint32(v4)) * uint64(uint32(v4>>32))
-	v5 := lastStripe[5] ^ sFinal[5]
-	acc[4] += lastStripe[5]
-	acc[5] += uint64(uint32(v5)) * uint64(uint32(v5>>32))
-	v6 := lastStripe[6] ^ sFinal[6]
-	acc[7] += lastStripe[6]
-	acc[6] += uint64(uint32(v6)) * uint64(uint32(v6>>32))
-	v7 := lastStripe[7] ^ sFinal[7]
-	acc[6] += lastStripe[7]
-	acc[7] += uint64(uint32(v7)) * uint64(uint32(v7>>32))
+	accumulatorFunc(acc, lastStripe, sFinal)
 }
 
 //go:inline

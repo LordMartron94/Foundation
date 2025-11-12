@@ -134,6 +134,8 @@ func BenchmarkHash_Comparison_Maphash(b *testing.B) {
 		benchmarking.BenchmarkSetup(b, "XXH3_64.noAVX2", config,
 			func(b *testing.B) benchData2 {
 				cpu.X86.HasAVX2 = false
+
+				XXH3HasherReinitialize()
 				return benchData2{
 					hasher: XXH3HasherCreateWithSeed(0),
 					data:   input,
@@ -152,6 +154,7 @@ func BenchmarkHash_Comparison_Maphash(b *testing.B) {
 		benchmarking.BenchmarkSetup(b, "XXH3_64.AVX2", config,
 			func(b *testing.B) benchData2 {
 				cpu.X86.HasAVX2 = true
+				XXH3HasherReinitialize()
 				return benchData2{
 					hasher: XXH3HasherCreateWithSeed(0),
 					data:   input,

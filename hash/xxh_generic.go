@@ -1,5 +1,9 @@
 package hash
 
+type xxh3AccumulateFunc func(acc *[8]uint64, block *[8]uint64, secret *[8]uint64)
+
+type xxh3ScrambleFunc func(accumulator *[8]uint64, sw *[8]uint64)
+
 //go:inline
 //go:nosplit
 func xxh3Accumulate512_scalar(acc *[8]uint64, block *[8]uint64, secret *[8]uint64) {
