@@ -493,53 +493,6 @@ func xxh3Hasher128Length129To240(
 	accumulator[1] ^= dw1[0] + dw1[1]
 }
 
-//go:inline
-//go:nosplit
-func xxh3HasherAccumulate(hasher *XXH3Hasher, accumulator *[8]uint64, stripe [8]uint64, secretOffset uint64, secret []byte) {
-	sw := *(*[8]uint64)(unsafe.Pointer(&secret[secretOffset]))
-
-	{
-		v := stripe[0] ^ sw[0]
-		accumulator[1] += stripe[0]
-		accumulator[0] += uint64(uint32(v)) * uint64(uint32(v>>32))
-	}
-	{
-		v := stripe[1] ^ sw[1]
-		accumulator[0] += stripe[1]
-		accumulator[1] += uint64(uint32(v)) * uint64(uint32(v>>32))
-	}
-	{
-		v := stripe[2] ^ sw[2]
-		accumulator[3] += stripe[2]
-		accumulator[2] += uint64(uint32(v)) * uint64(uint32(v>>32))
-	}
-	{
-		v := stripe[3] ^ sw[3]
-		accumulator[2] += stripe[3]
-		accumulator[3] += uint64(uint32(v)) * uint64(uint32(v>>32))
-	}
-	{
-		v := stripe[4] ^ sw[4]
-		accumulator[5] += stripe[4]
-		accumulator[4] += uint64(uint32(v)) * uint64(uint32(v>>32))
-	}
-	{
-		v := stripe[5] ^ sw[5]
-		accumulator[4] += stripe[5]
-		accumulator[5] += uint64(uint32(v)) * uint64(uint32(v>>32))
-	}
-	{
-		v := stripe[6] ^ sw[6]
-		accumulator[7] += stripe[6]
-		accumulator[6] += uint64(uint32(v)) * uint64(uint32(v>>32))
-	}
-	{
-		v := stripe[7] ^ sw[7]
-		accumulator[6] += stripe[7]
-		accumulator[7] += uint64(uint32(v)) * uint64(uint32(v>>32))
-	}
-}
-
 //go:nosplit
 //go:inline
 func xxh3HasherAccumulateAll(
@@ -552,122 +505,30 @@ func xxh3HasherAccumulateAll(
 	secretLength := uint64(len(secret))
 	stripesPerBlock := (secretLength - 64) / 8
 	blockSize := 64 * stripesPerBlock
-	sw := *(*[8]uint64)(unsafe.Pointer(&secret[secretLength-64]))
+	sw := (*[8]uint64)(unsafe.Pointer(&secret[secretLength-64]))
 
 	idx := uint64(0)
 	for ; idx+blockSize < contentLength; idx += blockSize {
 		block := content[idx : idx+blockSize]
 
-		// ─── process 2 stripes (128 B) per iteration ───
 		for n := uint64(0); n+1 < stripesPerBlock; n += 2 {
 			s0 := (*[8]uint64)(unsafe.Pointer(&secret[n*8]))
 			s1 := (*[8]uint64)(unsafe.Pointer(&secret[(n+1)*8]))
 			b0 := (*[8]uint64)(unsafe.Pointer(&block[n*64]))
 			b1 := (*[8]uint64)(unsafe.Pointer(&block[(n+1)*64]))
 
-			// Stripe 0
-			v0 := b0[0] ^ s0[0]
-			v1 := b0[1] ^ s0[1]
-			v2 := b0[2] ^ s0[2]
-			v3 := b0[3] ^ s0[3]
-			v4 := b0[4] ^ s0[4]
-			v5 := b0[5] ^ s0[5]
-			v6 := b0[6] ^ s0[6]
-			v7 := b0[7] ^ s0[7]
-
-			acc[1] += b0[0]
-			acc[0] += uint64(uint32(v0)) * uint64(uint32(v0>>32))
-			acc[0] += b0[1]
-			acc[1] += uint64(uint32(v1)) * uint64(uint32(v1>>32))
-			acc[3] += b0[2]
-			acc[2] += uint64(uint32(v2)) * uint64(uint32(v2>>32))
-			acc[2] += b0[3]
-			acc[3] += uint64(uint32(v3)) * uint64(uint32(v3>>32))
-			acc[5] += b0[4]
-			acc[4] += uint64(uint32(v4)) * uint64(uint32(v4>>32))
-			acc[4] += b0[5]
-			acc[5] += uint64(uint32(v5)) * uint64(uint32(v5>>32))
-			acc[7] += b0[6]
-			acc[6] += uint64(uint32(v6)) * uint64(uint32(v6>>32))
-			acc[6] += b0[7]
-			acc[7] += uint64(uint32(v7)) * uint64(uint32(v7>>32))
-
-			// Stripe 1
-			v8 := b1[0] ^ s1[0]
-			v9 := b1[1] ^ s1[1]
-			v10 := b1[2] ^ s1[2]
-			v11 := b1[3] ^ s1[3]
-			v12 := b1[4] ^ s1[4]
-			v13 := b1[5] ^ s1[5]
-			v14 := b1[6] ^ s1[6]
-			v15 := b1[7] ^ s1[7]
-
-			acc[1] += b1[0]
-			acc[0] += uint64(uint32(v8)) * uint64(uint32(v8>>32))
-			acc[0] += b1[1]
-			acc[1] += uint64(uint32(v9)) * uint64(uint32(v9>>32))
-			acc[3] += b1[2]
-			acc[2] += uint64(uint32(v10)) * uint64(uint32(v10>>32))
-			acc[2] += b1[3]
-			acc[3] += uint64(uint32(v11)) * uint64(uint32(v11>>32))
-			acc[5] += b1[4]
-			acc[4] += uint64(uint32(v12)) * uint64(uint32(v12>>32))
-			acc[4] += b1[5]
-			acc[5] += uint64(uint32(v13)) * uint64(uint32(v13>>32))
-			acc[7] += b1[6]
-			acc[6] += uint64(uint32(v14)) * uint64(uint32(v14>>32))
-			acc[6] += b1[7]
-			acc[7] += uint64(uint32(v15)) * uint64(uint32(v15>>32))
+			xxh3Accumulate512Dispatch(acc, b0, s0)
+			xxh3Accumulate512Dispatch(acc, b1, s1)
 		}
 
-		// ─── Handle tail stripe if odd count ───
 		if stripesPerBlock&1 != 0 {
 			n := stripesPerBlock - 1
 			s := (*[8]uint64)(unsafe.Pointer(&secret[n*8]))
 			b := (*[8]uint64)(unsafe.Pointer(&block[n*64]))
-			v0 := b[0] ^ s[0]
-			v1 := b[1] ^ s[1]
-			v2 := b[2] ^ s[2]
-			v3 := b[3] ^ s[3]
-			v4 := b[4] ^ s[4]
-			v5 := b[5] ^ s[5]
-			v6 := b[6] ^ s[6]
-			v7 := b[7] ^ s[7]
-			acc[1] += b[0]
-			acc[0] += uint64(uint32(v0)) * uint64(uint32(v0>>32))
-			acc[0] += b[1]
-			acc[1] += uint64(uint32(v1)) * uint64(uint32(v1>>32))
-			acc[3] += b[2]
-			acc[2] += uint64(uint32(v2)) * uint64(uint32(v2>>32))
-			acc[2] += b[3]
-			acc[3] += uint64(uint32(v3)) * uint64(uint32(v3>>32))
-			acc[5] += b[4]
-			acc[4] += uint64(uint32(v4)) * uint64(uint32(v4>>32))
-			acc[4] += b[5]
-			acc[5] += uint64(uint32(v5)) * uint64(uint32(v5>>32))
-			acc[7] += b[6]
-			acc[6] += uint64(uint32(v6)) * uint64(uint32(v6>>32))
-			acc[6] += b[7]
-			acc[7] += uint64(uint32(v7)) * uint64(uint32(v7>>32))
+			xxh3Accumulate512Dispatch(acc, b, s)
 		}
 
-		// Scramble accumulators after each block
-		acc[0] = (acc[0] ^ (acc[0] >> 47)) ^ sw[0]
-		acc[0] *= prime32_1
-		acc[1] = (acc[1] ^ (acc[1] >> 47)) ^ sw[1]
-		acc[1] *= prime32_1
-		acc[2] = (acc[2] ^ (acc[2] >> 47)) ^ sw[2]
-		acc[2] *= prime32_1
-		acc[3] = (acc[3] ^ (acc[3] >> 47)) ^ sw[3]
-		acc[3] *= prime32_1
-		acc[4] = (acc[4] ^ (acc[4] >> 47)) ^ sw[4]
-		acc[4] *= prime32_1
-		acc[5] = (acc[5] ^ (acc[5] >> 47)) ^ sw[5]
-		acc[5] *= prime32_1
-		acc[6] = (acc[6] ^ (acc[6] >> 47)) ^ sw[6]
-		acc[6] *= prime32_1
-		acc[7] = (acc[7] ^ (acc[7] >> 47)) ^ sw[7]
-		acc[7] *= prime32_1
+		xxh3ScrambleAccDispatch(acc, sw)
 	}
 
 	// ─── Phase 2: last block ───

@@ -6,6 +6,8 @@ import (
 	"foundation/benchmarking"
 	"hash/maphash"
 	"testing"
+
+	"golang.org/x/sys/cpu"
 )
 
 // ────────────────────────────────────────────────────────────────
@@ -129,8 +131,9 @@ func BenchmarkHash_Comparison_Maphash(b *testing.B) {
 			},
 		)
 
-		benchmarking.BenchmarkSetup(b, "XXH3_64", config,
+		benchmarking.BenchmarkSetup(b, "XXH3_64.noAVX2", config,
 			func(b *testing.B) benchData2 {
+				cpu.X86.HasAVX2 = false
 				return benchData2{
 					hasher: XXH3HasherCreateWithSeed(0),
 					data:   input,
@@ -142,7 +145,25 @@ func BenchmarkHash_Comparison_Maphash(b *testing.B) {
 				}
 			},
 			func(data benchData2, b *testing.B) {
+				cpu.X86.HasAVX2 = true
+			},
+		)
 
+		benchmarking.BenchmarkSetup(b, "XXH3_64.AVX2", config,
+			func(b *testing.B) benchData2 {
+				cpu.X86.HasAVX2 = true
+				return benchData2{
+					hasher: XXH3HasherCreateWithSeed(0),
+					data:   input,
+				}
+			},
+			func(data benchData2, b *testing.B) {
+				for i := 0; i < b.N; i++ {
+					_ = XXH3HasherHash64(data.hasher, input)
+				}
+			},
+			func(data benchData2, b *testing.B) {
+				cpu.X86.HasAVX2 = true
 			},
 		)
 	}
