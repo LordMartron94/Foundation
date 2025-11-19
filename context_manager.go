@@ -2,7 +2,10 @@
 // Said differently: foundation is the foundational lib.
 package foundation
 
-import "fmt"
+import (
+	"fmt"
+	"sync"
+)
 
 // ContextFunc specifies what to execute during the context.
 type ContextFunc[T any] func(data T) error
@@ -22,4 +25,12 @@ func WithContext[T any](ctx T, ctxFn ContextFunc[T], ctxCleanupFn ContextCleanup
 		}
 	}()
 	return ctxFn(ctx)
+}
+
+// WithLock executes a function while the lock is locked.
+// It automatically unlocks after the function is complete.
+func WithLock(lock *sync.Mutex, fn func()) {
+	lock.Lock()
+	fn()
+	lock.Unlock()
 }
