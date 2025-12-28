@@ -45,25 +45,63 @@ type ExtendedNumeric interface {
 //  Uint128 Implementation
 // ────────────────────────────────────────────────────────────────
 
-// Uint128 represents a 128-bit unsigned integer using two uint64 words.
+/*
+Uint128 represents a 128-bit unsigned integer using two uint64 words.
+
+The structure stores the value in two 64-bit words:
+- Lo: Least significant 64 bits
+- Hi: Most significant 64 bits
+
+Use cases:
+- Cryptographic operations requiring 128-bit precision
+- Large integer arithmetic beyond uint64 range
+- Hash function implementations (XXH3, etc.)
+- High-precision numeric computations
+- Database ID generation with extended range
+
+Time complexity: O(1) for all operations (constant time)
+Space complexity: O(1) - fixed 16 bytes per value
+
+Prerequisites:
+- None - zero value is valid (represents 0)
+
+Edge cases:
+- Zero value (Uint128{0, 0}) represents 0
+- Maximum value (Uint128{^uint64(0), ^uint64(0)}) represents 2^128 - 1
+- Arithmetic operations wrap around at 2^128 (modular arithmetic)
+*/
 type Uint128 struct {
 	Lo uint64 // Least significant 64 bits
 	Hi uint64 // Most significant 64 bits
 }
 
-// Uint128New constructs a new 128-bit value from the given high and low words.
-//
-// The conventional ordering is:
-//
-//	Uint128New(lo, hi) — where lo is the least significant part.
-//
-// But to match your signature (value1, value2), we'll assume:
-//
-//	value1 → lower 64 bits (Lo)
-//	value2 → upper 64 bits (Hi)
-//
-// So Uint128New(0x0123456789ABCDEF, 0xFEDCBA9876543210)
-// represents the 128-bit integer 0xFEDCBA98765432100123456789ABCDEF.
+/*
+Uint128New constructs a new 128-bit value from the given low and high words.
+
+The function takes two uint64 values and combines them into a 128-bit integer:
+- lo: Lower 64 bits (least significant)
+- hi: Upper 64 bits (most significant)
+
+Use cases:
+- Creating 128-bit values from two 64-bit components
+- Converting uint64 values to Uint128
+- Initializing Uint128 constants
+- Building 128-bit values from separate high/low parts
+
+Time complexity: O(1) - simple struct initialization
+Space complexity: O(1) - returns a single struct value
+
+Prerequisites:
+- None - accepts any uint64 values
+
+Edge cases:
+- Uint128New(0, 0) creates zero value
+- Uint128New(^uint64(0), ^uint64(0)) creates maximum value
+- Order is important: lo is lower bits, hi is upper bits
+
+Example: Uint128New(0x0123456789ABCDEF, 0xFEDCBA9876543210)
+represents the 128-bit integer 0xFEDCBA98765432100123456789ABCDEF.
+*/
 func Uint128New(lo, hi uint64) Uint128 {
 	return Uint128{
 		Lo: lo,
@@ -71,27 +109,133 @@ func Uint128New(lo, hi uint64) Uint128 {
 	}
 }
 
-// Add returns x + y.
-func (x Uint128) Add(y Uint128) Uint128 {
+/*
+Uint128Add computes the sum of two 128-bit unsigned integers.
+
+The function performs full 128-bit addition with carry propagation between
+the low and high words. The result wraps around at 2^128 (modular arithmetic).
+
+Use cases:
+- Accumulating large counters beyond uint64 range
+- Cryptographic hash accumulation
+- Large integer arithmetic
+- Summing 128-bit values in loops
+
+Time complexity: O(1) - two 64-bit additions with carry
+Space complexity: O(1) - only local variables used
+
+Prerequisites:
+- x and y must be valid Uint128 values
+
+Edge cases:
+- Addition wraps around at 2^128 (x + y mod 2^128)
+- Adding zero returns the other operand unchanged
+- Adding maximum value to 1 wraps to 0
+- Carry propagates correctly from Lo to Hi word
+
+The function uses bits.Add64 for efficient carry handling.
+*/
+func Uint128Add(x, y Uint128) Uint128 {
 	lo, carry := bits.Add64(x.Lo, y.Lo, 0)
 	hi, _ := bits.Add64(x.Hi, y.Hi, carry)
 	return Uint128{Lo: lo, Hi: hi}
 }
 
-// Xor returns x ^ y.
-func (x Uint128) Xor(y Uint128) Uint128 {
+/*
+Uint128Xor computes the bitwise exclusive OR of two 128-bit unsigned integers.
+
+The function performs XOR operation independently on both the low and high
+64-bit words, producing a 128-bit result.
+
+Use cases:
+- Cryptographic operations (hash mixing, PRNG)
+- Bit manipulation and masking
+- Fast equality checking (x XOR x = 0)
+- Hash function implementations
+
+Time complexity: O(1) - two 64-bit XOR operations
+Space complexity: O(1) - only local variables used
+
+Prerequisites:
+- x and y must be valid Uint128 values
+
+Edge cases:
+- XOR with zero returns the other operand unchanged
+- XOR with self returns zero
+- XOR is commutative and associative
+- Each bit position is independent
+
+The operation is performed word-wise: result.Lo = x.Lo ^ y.Lo, result.Hi = x.Hi ^ y.Hi.
+*/
+func Uint128Xor(x, y Uint128) Uint128 {
 	return Uint128{Lo: x.Lo ^ y.Lo, Hi: x.Hi ^ y.Hi}
 }
 
-// Mul returns (x * y) mod 2^128 (low 128 bits only).
-func (x Uint128) Mul(y Uint128) Uint128 {
+/*
+Uint128Mul computes the product of two 128-bit unsigned integers modulo 2^128.
+
+The function multiplies two 128-bit values and returns only the low 128 bits
+of the result. The full 256-bit product is truncated to fit in 128 bits.
+
+Use cases:
+- Cryptographic hash functions (XXH3, etc.)
+- Large integer multiplication with modular arithmetic
+- Hash mixing and avalanche operations
+- PRNG state transitions
+
+Time complexity: O(1) - uses bits.Mul64 for efficient 64x64 multiplication
+Space complexity: O(1) - only local variables used
+
+Prerequisites:
+- x and y must be valid Uint128 values
+
+Edge cases:
+- Multiplying by zero returns zero
+- Multiplying by one returns the other operand
+- Result wraps at 2^128 (x * y mod 2^128)
+- High bits of the 256-bit product are discarded
+
+The function computes: (x.Lo * y.Lo) + (x.Hi * y.Lo << 64) + (x.Lo * y.Hi << 64),
+keeping only the low 128 bits of the result.
+*/
+func Uint128Mul(x, y Uint128) Uint128 {
 	hi, lo := bits.Mul64(x.Lo, y.Lo)
 	hi += x.Hi*y.Lo + x.Lo*y.Hi
 	return Uint128{Lo: lo, Hi: hi}
 }
 
-// ShiftRight returns x >> n.
-func (x Uint128) ShiftRight(n uint) Uint128 {
+/*
+Uint128ShiftRight performs a logical right shift on a 128-bit unsigned integer.
+
+The function shifts the value right by n bits, filling high bits with zeros.
+Shifts beyond 128 bits result in zero.
+
+Use cases:
+- Division by powers of 2
+- Extracting high-order bits
+- Bit manipulation and masking
+- Hash function bit mixing
+
+Time complexity: O(1) - constant time regardless of shift amount
+Space complexity: O(1) - only local variables used
+
+Prerequisites:
+- x must be a valid Uint128 value
+- n can be any non-negative integer
+
+Edge cases:
+- Shifting by 0 returns x unchanged
+- Shifting by 64 moves Hi word to Lo, Hi becomes 0
+- Shifting by 128 or more returns zero
+- Bits shifted out are discarded (logical shift, not arithmetic)
+
+The function handles three cases:
+- n == 0: return x unchanged
+- n < 64: shift both words, carry bits from Hi to Lo
+- n < 128: shift only Hi word, Lo becomes Hi >> (n-64)
+- n >= 128: return zero
+*/
+func Uint128ShiftRight(x Uint128, n uint) Uint128 {
 	if n == 0 {
 		return x
 	}
@@ -108,6 +252,174 @@ func (x Uint128) ShiftRight(n uint) Uint128 {
 		}
 	}
 	return Uint128{}
+}
+
+/*
+Uint128BytesLittleEndian converts a 128-bit unsigned integer to a byte slice in little-endian order.
+
+The function serializes the Uint128 value to a 16-byte slice with the least
+significant byte first. The low 64-bit word (Lo) appears first, followed by
+the high 64-bit word (Hi), both in little-endian byte order.
+
+Use cases:
+- Network protocol serialization
+- File format encoding
+- Cryptographic key storage
+- Database storage of 128-bit values
+- Interoperability with little-endian systems
+
+Time complexity: O(1) - fixed 16-byte allocation and writes
+Space complexity: O(1) - allocates exactly 16 bytes
+
+Prerequisites:
+- x must be a valid Uint128 value
+
+Edge cases:
+- Zero value produces 16 zero bytes
+- Maximum value produces 16 bytes of 0xFF
+- Byte order: Lo bytes first (0-7), then Hi bytes (8-15)
+- Each 64-bit word is stored in little-endian within its 8-byte range
+
+The returned slice is a new allocation. The caller owns the memory.
+*/
+func Uint128BytesLittleEndian(x Uint128) []byte {
+	bytes := make([]byte, 16)
+	for i := 0; i < 8; i++ {
+		bytes[i] = byte(x.Lo >> (i * 8))
+	}
+	for i := 0; i < 8; i++ {
+		bytes[i+8] = byte(x.Hi >> (i * 8))
+	}
+	return bytes
+}
+
+/*
+Uint128BytesBigEndian converts a 128-bit unsigned integer to a byte slice in big-endian order.
+
+The function serializes the Uint128 value to a 16-byte slice with the most
+significant byte first. The high 64-bit word (Hi) appears first, followed by
+the low 64-bit word (Lo), both in big-endian byte order.
+
+Use cases:
+- Network protocol serialization (network byte order)
+- File format encoding
+- Cryptographic key storage
+- Database storage of 128-bit values
+- Interoperability with big-endian systems
+
+Time complexity: O(1) - fixed 16-byte allocation and writes
+Space complexity: O(1) - allocates exactly 16 bytes
+
+Prerequisites:
+- x must be a valid Uint128 value
+
+Edge cases:
+- Zero value produces 16 zero bytes
+- Maximum value produces 16 bytes of 0xFF
+- Byte order: Hi bytes first (0-7), then Lo bytes (8-15)
+- Each 64-bit word is stored in big-endian within its 8-byte range
+
+The returned slice is a new allocation. The caller owns the memory.
+*/
+func Uint128BytesBigEndian(x Uint128) []byte {
+	bytes := make([]byte, 16)
+	for i := 0; i < 8; i++ {
+		bytes[7-i] = byte(x.Lo >> (i * 8))
+	}
+	for i := 0; i < 8; i++ {
+		bytes[15-i] = byte(x.Hi >> (i * 8))
+	}
+	return bytes
+}
+
+/*
+Uint128FromBytesLittleEndian constructs a 128-bit unsigned integer from a byte slice in little-endian order.
+
+The function deserializes a 16-byte slice into a Uint128 value, interpreting the bytes
+in little-endian order. The first 8 bytes (0-7) form the low 64-bit word (Lo), and
+the next 8 bytes (8-15) form the high 64-bit word (Hi), both in little-endian byte order.
+
+Use cases:
+- Deserializing 128-bit values from network protocols
+- Reading 128-bit values from file formats
+- Reconstructing cryptographic keys from stored bytes
+- Loading 128-bit database values
+- Interoperability with little-endian systems
+
+Time complexity: O(1) - fixed 16-byte read operations
+Space complexity: O(1) - only local variables used
+
+Prerequisites:
+- bytes must contain exactly 16 bytes
+- bytes must not be nil
+
+Edge cases:
+- Panics if bytes length is not exactly 16
+- 16 zero bytes produce zero value
+- 16 bytes of 0xFF produce maximum value
+- Byte order: bytes[0-7] form Lo (little-endian), bytes[8-15] form Hi (little-endian)
+- If bytes is longer than 16 bytes, only the first 16 bytes are used
+
+The function is the inverse of Uint128BytesLittleEndian.
+*/
+func Uint128FromBytesLittleEndian(bytes []byte) Uint128 {
+	if len(bytes) < 16 {
+		panic("foundation.Uint128FromBytesLittleEndian: byte slice must contain at least 16 bytes")
+	}
+	var lo uint64
+	var hi uint64
+	for i := 0; i < 8; i++ {
+		lo |= uint64(bytes[i]) << (i * 8)
+	}
+	for i := 0; i < 8; i++ {
+		hi |= uint64(bytes[i+8]) << (i * 8)
+	}
+	return Uint128{Lo: lo, Hi: hi}
+}
+
+/*
+Uint128FromBytesBigEndian constructs a 128-bit unsigned integer from a byte slice in big-endian order.
+
+The function deserializes a 16-byte slice into a Uint128 value, interpreting the bytes
+in big-endian order. The first 8 bytes (0-7) form the high 64-bit word (Hi), and
+the next 8 bytes (8-15) form the low 64-bit word (Lo), both in big-endian byte order.
+
+Use cases:
+- Deserializing 128-bit values from network protocols (network byte order)
+- Reading 128-bit values from file formats
+- Reconstructing cryptographic keys from stored bytes
+- Loading 128-bit database values
+- Interoperability with big-endian systems
+
+Time complexity: O(1) - fixed 16-byte read operations
+Space complexity: O(1) - only local variables used
+
+Prerequisites:
+- bytes must contain exactly 16 bytes
+- bytes must not be nil
+
+Edge cases:
+- Panics if bytes length is not exactly 16
+- 16 zero bytes produce zero value
+- 16 bytes of 0xFF produce maximum value
+- Byte order: bytes[0-7] form Hi (big-endian), bytes[8-15] form Lo (big-endian)
+- If bytes is longer than 16 bytes, only the first 16 bytes are used
+
+The function is the inverse of Uint128BytesBigEndian.
+*/
+func Uint128FromBytesBigEndian(bytes []byte) Uint128 {
+	if len(bytes) < 16 {
+		panic("foundation.Uint128FromBytesBigEndian: byte slice must contain at least 16 bytes")
+	}
+	var lo uint64
+	var hi uint64
+	for i := 0; i < 8; i++ {
+		hi |= uint64(bytes[i]) << ((7 - i) * 8)
+	}
+	for i := 0; i < 8; i++ {
+		lo |= uint64(bytes[i+8]) << ((7 - i) * 8)
+	}
+	return Uint128{Lo: lo, Hi: hi}
 }
 
 // Zero and Max constants

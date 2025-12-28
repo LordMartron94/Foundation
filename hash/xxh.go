@@ -291,7 +291,10 @@ func xxh3Hasher128Length4To8(hasher *XXH3Hasher, inputFirst, inputLast uint32, m
 	combined := uint64(inputFirst) | (uint64(inputLast) << 32)
 	value := ((secretWords[0] ^ secretWords[1]) + modifiedSeed) ^ combined
 
-	mulResult := foundation.Uint128{Lo: value, Hi: 0}.Mul(foundation.Uint128{Lo: prime64_1 + (inputLength << 2), Hi: 0})
+	mulResult := foundation.Uint128Mul(
+		foundation.Uint128{Lo: value, Hi: 0},
+		foundation.Uint128{Lo: prime64_1 + (inputLength << 2), Hi: 0},
+	)
 
 	hi := mulResult.Hi
 	lo := mulResult.Lo
