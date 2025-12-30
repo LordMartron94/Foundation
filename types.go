@@ -801,18 +801,23 @@ func Sqrt[T Numeric](x T) T {
 
 func Sqrt32[T Numeric](x T) float32 {
 	f := toFloat64(x)
-	if f < 0 {
-		return float32(math.NaN())
-	}
-	return float32(math.Sqrt(f))
+	fCnv := float32(f)
+	return defaultSqrtDispatchTable.sqrt32(fCnv)
 }
 
 func Sqrt64[T Numeric](x T) float64 {
 	f := toFloat64(x)
-	if f < 0 {
-		return math.NaN()
+	return defaultSqrtDispatchTable.sqrt64(f)
+}
+
+func Clamp[T Numeric](v, min, max T) T {
+	if v < min {
+		return min
+	} else if v > max {
+		return max
 	}
-	return math.Sqrt(f)
+
+	return v
 }
 
 // ────────────────────────────────────────────────────────────────
