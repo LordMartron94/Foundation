@@ -11,6 +11,38 @@ import (
 )
 
 /*
+BenchmarkMetricsConfig provides optional configuration for advanced throughput metrics.
+
+Use cases:
+- Configuring FLOPS reporting for computational benchmarks
+- Specifying manual memory bytes per operation for accurate memory throughput with manual memory management
+- Specifying items processed per operation for accurate throughput calculation
+- Future extensibility for additional throughput metrics
+
+Fields:
+- FLOPSPerOp: Floating point operations per benchmark operation (0 means not specified)
+- BytesPerOp: Manual memory bytes per operation (0 means not specified). Use this when benchmarks use manual memory management (memcore, memforge, etc.) outside the Go GC. This takes precedence over standard GC-tracked bytes/op for memory throughput calculation.
+- ItemsPerOp: Items processed per operation (for future extensibility, 0 means not specified)
+
+Time complexity: O(1)
+Space complexity: O(1)
+
+Prerequisites:
+- Zero value means no additional metrics will be reported
+- All fields are optional and default to 0
+
+Edge cases:
+- Zero values are ignored (no metrics reported for that field)
+- Negative values are treated as zero
+- BytesPerOp should be used when benchmarks allocate memory outside Go's GC (e.g., via memcore, memforge)
+*/
+type BenchmarkMetricsConfig struct {
+	FLOPSPerOp float64
+	BytesPerOp float64
+	ItemsPerOp float64
+}
+
+/*
 BenchmarkWithMetrics executes a benchmark with comprehensive metrics collection and reporting.
 
 This function provides a standardized way to run benchmarks with automatic collection
@@ -44,6 +76,8 @@ Reported Metrics:
 - ns/op.gc.pause.avg: Average GC pause time per GC cycle
 - ops/sec: Operations per second throughput
 - sys.bytes: Total system memory obtained from OS
+
+For advanced throughput metrics (FLOPS, etc.), use BenchmarkWithMetricsConfig instead.
 
 Time complexity: O(n) - where n is the work performed by benchmarkFn
 Space complexity: O(1) - minimal overhead for metrics collection
@@ -142,6 +176,70 @@ func BenchmarkWithMetrics[data any](
 	b.ReportMetric(float64(after.Sys), "sys.bytes")
 
 	fmt.Fprintf(os.Stderr, "✅ Finished %s\n", name)
+}
+
+/*
+BenchmarkWithMetricsConfig executes a benchmark with comprehensive metrics collection and optional throughput configuration.
+
+This function wraps BenchmarkWithMetrics and adds support for configurable throughput metrics
+such as FLOPS (Floating Point Operations Per Second). It maintains full backward compatibility
+with BenchmarkWithMetrics while providing additional metrics when configured.
+
+The function performs the following steps:
+1. Calls BenchmarkWithMetrics to collect standard metrics
+2. Calculates and reports derived throughput metrics based on config
+3. Reports flops/sec if FLOPSPerOp is specified: flops/sec = FLOPSPerOp * ops/sec
+
+Parameters:
+- b: Benchmark context from testing.B
+- config: Configuration struct with optional throughput metrics (zero value means no additional metrics)
+- prepareFn: Function to prepare benchmark data (executed before timing starts)
+- benchmarkFn: Function containing the actual benchmark code (executed during timing)
+- cleanupFn: Function to clean up resources (executed after timing ends, may be nil)
+
+Reported Metrics:
+- All metrics from BenchmarkWithMetrics
+- flops/sec: Floating point operations per second (if FLOPSPerOp > 0 in config)
+- manual.bytes/op: Manual memory bytes per operation (if BytesPerOp > 0 in config)
+
+Example usage:
+	BenchmarkWithMetricsConfig(b, BenchmarkMetricsConfig{FLOPSPerOp: 1024.0}, prepareFn, testFn, cleanupFn)
+	
+	// For manual memory management:
+	BenchmarkWithMetricsConfig(b, BenchmarkMetricsConfig{BytesPerOp: 4096.0}, prepareFn, testFn, cleanupFn)
+
+Time complexity: O(n) - where n is the work performed by benchmarkFn
+Space complexity: O(1) - minimal overhead for metrics collection
+
+Prerequisites:
+- config can be zero value (no additional metrics will be reported)
+- BenchmarkWithMetrics must complete successfully for derived metrics to be calculated
+
+Edge cases:
+- Zero or negative config values are ignored (no metrics reported)
+- Derived metrics require ops/sec to be available from BenchmarkWithMetrics
+- If ops/sec is not available, derived metrics are not reported
+*/
+func BenchmarkWithMetricsConfig[data any](
+	b *testing.B,
+	config BenchmarkMetricsConfig,
+	prepareFn func(b *testing.B) data,
+	benchmarkFn func(data data, b *testing.B),
+	cleanupFn func(data data, b *testing.B),
+) {
+	BenchmarkWithMetrics(b, prepareFn, benchmarkFn, cleanupFn)
+
+	// Calculate and report derived metrics based on config
+	if config.FLOPSPerOp > 0 && b.Elapsed().Seconds() > 0 {
+		opsPerSec := float64(b.N) / b.Elapsed().Seconds()
+		flopsPerSec := config.FLOPSPerOp * opsPerSec
+		b.ReportMetric(flopsPerSec, "flops/sec")
+	}
+
+	// Report manual bytes/op if specified (for manual memory management)
+	if config.BytesPerOp > 0 {
+		b.ReportMetric(config.BytesPerOp, "manual.bytes/op")
+	}
 }
 
 /*
