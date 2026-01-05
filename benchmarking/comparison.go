@@ -1,6 +1,7 @@
 package benchmarking
 
 import (
+	"fmt"
 	"time"
 )
 
@@ -25,7 +26,7 @@ type BenchFunction[TData any] func(data TData)
 type CleanupFn[TData any] func(data TData)
 
 // Measurer captures the metric (time, memory) from the function.
-type Measurer[TData any] func(fn BenchFunction[TData], data TData) float64
+type Measurer[TData any] func(fn BenchFunction[TData], data TData, targetRuntime time.Duration) float64
 
 // StatisticalStrategy is the injected judge (Dependency Inversion).
 type StatisticalStrategy func(samplesA, samplesB []float64) ComparisonResult
@@ -51,6 +52,7 @@ func FindCrossover[TData any](
 	measure Measurer[TData],
 	judge StatisticalStrategy,
 	cfg SearchConfig,
+	targetRuntime time.Duration,
 ) CrossoverResult {
 
 	low := cfg.MinParam
@@ -63,11 +65,11 @@ func FindCrossover[TData any](
 		lastMid = mid
 
 		dataA := prepA(Parameter(mid))
-		rawA = collectData(benchA, dataA, measure, cfg.Samples)
+		rawA = collectData(benchA, dataA, measure, cfg.Samples, targetRuntime)
 		cleanA(dataA)
 
 		dataB := prepB(Parameter(mid))
-		rawB = collectData(benchB, dataB, measure, cfg.Samples)
+		rawB = collectData(benchB, dataB, measure, cfg.Samples, targetRuntime)
 		cleanB(dataB)
 
 		verdict := judge(rawA, rawB)
@@ -102,19 +104,64 @@ func collectData[TData any](
 	data TData,
 	measure Measurer[TData],
 	samples int,
+	targetRuntime time.Duration,
 ) []float64 {
 	results := make([]float64, samples)
 
 	fn(data)
 
 	for i := 0; i < samples; i++ {
-		results[i] = measure(fn, data)
+		results[i] = measure(fn, data, targetRuntime)
 	}
 	return results
 }
 
-func MeasureTime[TData any](fn BenchFunction[TData], data TData) float64 {
+func MeasureTimeAdaptive[TData any](fn BenchFunction[TData], data TData, targetRuntime time.Duration, enableLogging bool) float64 {
+	// 1. Calibration Phase
+	const calibrationThreshold = 100 * time.Microsecond
+	iterations := 1
+	var duration time.Duration
+
+	for {
+		start := time.Now()
+		for i := 0; i < iterations; i++ {
+			fn(data)
+		}
+		duration = time.Since(start)
+
+		if duration >= calibrationThreshold {
+			break
+		}
+		if duration >= targetRuntime {
+			break
+		}
+
+		iterations *= 2
+	}
+
+	// 2. Extrapolation
+	var targetCount int
+	if duration >= targetRuntime {
+		targetCount = iterations
+	} else {
+		projectedOps := float64(targetRuntime) / float64(duration) * float64(iterations)
+		targetCount = int(projectedOps)
+		if targetCount == 0 {
+			targetCount = 1
+		}
+	}
+
+	if enableLogging {
+		fmt.Printf("   [Adaptive] Target: %v | Warmup: %v (%d ops) -> Sprint: %d ops\n",
+			targetRuntime, duration, iterations, targetCount)
+	}
+
+	// 3. Measurement Sprint
 	start := time.Now()
-	fn(data)
-	return float64(time.Since(start).Nanoseconds())
+	for i := 0; i < targetCount; i++ {
+		fn(data)
+	}
+	elapsed := time.Since(start)
+
+	return float64(elapsed.Nanoseconds()) / float64(targetCount)
 }
