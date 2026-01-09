@@ -9,9 +9,8 @@ import (
 type ComparisonResult int
 
 const (
-	ResultIndistinguishable ComparisonResult = 0
-	ResultAFaster           ComparisonResult = -1
-	ResultASlower           ComparisonResult = 1
+	PreferA ComparisonResult = -1
+	PreferB ComparisonResult = 1
 )
 
 type Parameter int
@@ -57,45 +56,46 @@ func FindCrossover[TData any](
 
 	low := cfg.MinParam
 	high := cfg.MaxParam
-	var lastMid int
-	var rawA, rawB []float64
+
+	// We keep track of the last known "ASM Win" configuration to be safe
+	bestCrossover := high
 
 	for low <= high {
 		mid := low + (high-low)/2
-		lastMid = mid
 
 		dataA := prepA(Parameter(mid))
-		rawA = collectData(benchA, dataA, measure, cfg.Samples, targetRuntime)
+		rawA := collectData(benchA, dataA, measure, cfg.Samples, targetRuntime)
 		cleanA(dataA)
 
 		dataB := prepB(Parameter(mid))
-		rawB = collectData(benchB, dataB, measure, cfg.Samples, targetRuntime)
+		rawB := collectData(benchB, dataB, measure, cfg.Samples, targetRuntime)
 		cleanB(dataB)
 
 		verdict := judge(rawA, rawB)
 
-		switch verdict {
-		case ResultIndistinguishable:
-			return CrossoverResult{
-				LowIndex:          low,
-				HighIndex:         high,
-				Indistinguishable: true,
-				FinalStatsA:       rawA,
-				FinalStatsB:       rawB,
-			}
-		case ResultASlower:
+		if verdict == PreferB {
+			bestCrossover = mid
 			high = mid - 1
-		case ResultAFaster:
+		} else {
 			low = mid + 1
 		}
 	}
 
+	// For reporting purposes, we grab stats at the final crossover point
+	// (This requires one extra run, but ensures the report matches the decision)
+	dataA := prepA(Parameter(bestCrossover))
+	finalStatsA := collectData(benchA, dataA, measure, cfg.Samples, targetRuntime)
+	cleanA(dataA)
+
+	dataB := prepB(Parameter(bestCrossover))
+	finalStatsB := collectData(benchB, dataB, measure, cfg.Samples, targetRuntime)
+	cleanB(dataB)
+
 	return CrossoverResult{
-		LowIndex:          lastMid,
-		HighIndex:         lastMid,
-		Indistinguishable: false,
-		FinalStatsA:       rawA,
-		FinalStatsB:       rawB,
+		LowIndex:    bestCrossover,
+		HighIndex:   bestCrossover,
+		FinalStatsA: finalStatsA,
+		FinalStatsB: finalStatsB,
 	}
 }
 
