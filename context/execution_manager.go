@@ -375,6 +375,41 @@ func ExecutionHistoryBatchStart[T any](manager *ExecutionHistory[T]) *Batch[T] {
 	return batch
 }
 
+/*
+ExecutionHistoryBatchHasActiveBatch checks if a batch has an active batch that can be committed or aborted.
+
+This checks both that the batch itself is not committed and that the manager has an active batch.
+
+Use cases:
+- Checking if a batch can be committed or aborted
+- Validating batch state before operations
+- Determining if frame operations are no-ops
+
+Time complexity: O(1) - simple state checks
+Space complexity: O(1) - no allocations
+
+Prerequisites:
+- batch must be a valid Batch instance (can be nil)
+
+Edge cases:
+- Returns false if batch is nil
+- Returns false if batch is already committed
+- Returns false if manager has no active batch (empty batch list)
+- Returns true if batch is valid and manager has queued operations
+- Thread-safe - uses mutex for concurrent access
+*/
+func ExecutionHistoryBatchHasActiveBatch[T any](batch *Batch[T]) bool {
+	if batch == nil {
+		return false
+	}
+	
+	var hasActiveBatch bool
+	foundation.WithLock(&batch.manager.lock, func() {
+		hasActiveBatch = !batch.committed && len(batch.manager.batch) > 0
+	})
+	return hasActiveBatch
+}
+
 // executionHistoryValidateBatch validates that a batch is valid for the given operation.
 // Panics if batch is invalid (already committed/aborted or no active batch).
 func executionHistoryValidateBatch[T any](manager *ExecutionHistory[T], batch *Batch[T], operation string) {
