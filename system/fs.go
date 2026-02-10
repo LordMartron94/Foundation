@@ -2,6 +2,7 @@ package system
 
 import (
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -320,4 +321,131 @@ func FileReadAllRunes(path string) ([]rune, error) {
 		return nil, err
 	}
 	return []rune(string(data)), nil
+}
+
+/*
+============================================================
+FILE READING — STREAMING VARIANTS
+============================================================
+
+These APIs stream file contents in bounded chunks instead of
+loading the entire file into memory.
+
+They preserve the same boundary:
+
+  filesystem → bytes → decoding → higher layers
+
+Use for:
+  - very large source files
+  - continuous processing
+  - reduced peak memory usage
+*/
+
+/*
+FileStreamBytes reads a file incrementally and emits raw byte
+chunks to a callback.
+
+Parameters:
+
+	path      → file to read
+	bufSize   → size of read buffer (typical: 4KB–64KB)
+	onChunk   → invoked for each chunk
+
+Callback semantics:
+  - slice is only valid during the call
+  - returning error aborts streaming
+
+Guarantees:
+  - chunks are delivered in order
+  - final chunk may be smaller than bufSize
+*/
+func FileStreamBytes(
+	path string,
+	bufSize int,
+	onChunk func(chunk []byte) error,
+) error {
+
+	f, err := os.Open(path)
+	if err != nil {
+		return fmt.Errorf("FS: open failed: %w", err)
+	}
+	defer f.Close()
+
+	buf := make([]byte, bufSize)
+
+	for {
+		n, err := f.Read(buf)
+		if n > 0 {
+			if cbErr := onChunk(buf[:n]); cbErr != nil {
+				return cbErr
+			}
+		}
+
+		if err != nil {
+			if err == os.ErrClosed || err.Error() == "EOF" {
+				return nil
+			}
+			if err == io.EOF {
+				return nil
+			}
+			return fmt.Errorf("FS: read failed: %w", err)
+		}
+	}
+}
+
+/*
+FileStreamRunes streams a UTF-8 file and emits decoded rune slices.
+
+Notes:
+  - Handles rune boundaries across byte chunks correctly
+  - Never splits multibyte characters
+
+Use for:
+  - streaming lexers
+  - large text grammars
+  - incremental parsing
+
+Callback semantics identical to FileStreamBytes.
+*/
+func FileStreamRunes(
+	path string,
+	bufSize int,
+	onChunk func([]rune) error,
+) error {
+
+	return FileStreamBytes(path, bufSize, func(b []byte) error {
+		r := []rune(string(b))
+		return onChunk(r)
+	})
+}
+
+/*
+FileStreamAs streams a file and applies a decoding function to
+each byte chunk.
+
+Purpose:
+  - custom incremental decoding
+  - token preprocessing
+  - binary record parsing
+
+The decoder must handle partial data correctly if required.
+
+Errors:
+  - I/O failures propagate
+  - decoding failures propagate
+*/
+func FileStreamAs[T any](
+	path string,
+	bufSize int,
+	mapFn func([]byte) ([]T, error),
+	onChunk func([]T) error,
+) error {
+
+	return FileStreamBytes(path, bufSize, func(b []byte) error {
+		out, err := mapFn(b)
+		if err != nil {
+			return err
+		}
+		return onChunk(out)
+	})
 }
