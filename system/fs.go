@@ -63,6 +63,56 @@ func FileWriteEmpty(path string) error {
 }
 
 /*
+FileWriteBytes writes raw bytes to a file.
+
+Behavior:
+  - Creates the file if it does not exist
+  - Truncates the file if it already exists
+  - Writes bytes as-is (no encoding, no newline normalization)
+
+Permissions:
+  - 0644 (owner read/write, group+others read)
+
+Notes:
+  - Does not create parent directories. Ensure PathDir(path) exists.
+  - This is an I/O boundary primitive; semantic meaning is layered above.
+
+Errors:
+  - Wraps OS-level write failures with context
+*/
+func FileWriteBytes(path string, data []byte) error {
+	if err := os.WriteFile(path, data, 0644); err != nil {
+		return fmt.Errorf("FS: write failed: %w", err)
+	}
+	return nil
+}
+
+/*
+FileWriteString writes a string to a file.
+
+Behavior:
+  - Creates the file if it does not exist
+  - Truncates the file if it already exists
+  - Writes bytes as-is (no encoding, no newline normalization)
+
+Permissions:
+  - 0644 (owner read/write, group+others read)
+
+Notes:
+  - Does not create parent directories. Ensure PathDir(path) exists.
+  - This is an I/O boundary primitive; semantic meaning is layered above.
+
+Errors:
+  - Wraps OS-level write failures with context
+*/
+func FileWriteString(path string, data string) error {
+	if err := os.WriteFile(path, []byte(data), 0644); err != nil {
+		return fmt.Errorf("FS: write failed: %w", err)
+	}
+	return nil
+}
+
+/*
 FileRename renames or moves a filesystem object.
 
 Safety invariant:
