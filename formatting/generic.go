@@ -6,83 +6,69 @@ import (
 )
 
 /*
-FormatStringSlice formats a slice of strings into a single string using a high-performance
-strings.Builder pipeline with flexible, composable formatting options.
+FormatSlice formats a slice of arbitrary elements into a single string using a
+high-performance strings.Builder pipeline with flexible, composable formatting.
 
-The function is designed for:
+Unlike FormatStringSlice, this function is fully generic and makes no assumptions
+about the underlying element type — all rendering flows through the provided
+FormatItem hook.
 
-  - zero unnecessary allocations
-  - predictable output
-  - extensible formatting behavior
-  - high-throughput debug/log/serialization use
+Design goals:
 
-It supports:
-
-  - custom separators (", ", " | ", "\n", etc.)
-  - optional prefix and suffix (e.g. "[", "]")
-  - per-element formatting hooks
-  - optional quoting
-  - optional escaping
-  - optional index inclusion
-  - conditional element skipping
-  - capacity pre-allocation for performance
+  - zero reflection
+  - zero intermediate allocations
+  - predictable hot loop
+  - extensible formatting
+  - suitable for diagnostics, debug printers, and serialization
 
 ────────────────────────────────────────────────────────────
-Default behavior (no options):
+Required:
 
-	["a", "b", "c"] → "a, b, c"
+	cfg.FormatItem must be provided.
+
+This avoids any implicit fmt-based slow paths and keeps performance explicit.
 
 ────────────────────────────────────────────────────────────
-Example:
+Default behavior (with simple formatter):
 
-	FormatStringSlice(
-	    []string{"foo", "bar"},
-	    FormatStringSliceOptions{
-	        Prefix: "[",
-	        Suffix: "]",
-	        Quote:  true,
+	FormatSlice(
+	    []int{1,2,3},
+	    FormatSliceOptions[int]{
+	        FormatItem: func(_ int, v int) string {
+	            return strconv.Itoa(v)
+	        },
 	    },
 	)
 
-Result:
-
-	["foo", "bar"]
-
-────────────────────────────────────────────────────────────
-Performance characteristics:
-
-  - O(n) time
-  - single growing buffer
-  - no intermediate slices
-  - minimal branching in hot loop
-
-This function is appropriate for:
-
-  - debug renderers
-  - serialization helpers
-  - logging
-  - DSL emitters
-  - diagnostics tooling
+→ "1, 2, 3"
 */
-func FormatStringSlice(
-	items []string,
-	cfg FormatSliceOptions[string],
+func FormatSlice[TElement any](
+	items []TElement,
+	cfg FormatSliceOptions[TElement],
 ) string {
+	if cfg.FormatItem == nil {
+		panic("FormatSlice: FormatItem is required for generic formatting")
+	}
+
 	if cfg.Separator == "" {
 		cfg.Separator = ", "
+	}
+
+	if cfg.IndexSeparator == "" {
+		cfg.IndexSeparator = ": "
 	}
 
 	var b strings.Builder
 
 	// ------------------------------------------------------------
-	// Capacity hint (best-effort, avoids repeated growth)
+	// Capacity hint
 	// ------------------------------------------------------------
 
 	if cfg.Prealloc > 0 {
 		b.Grow(cfg.Prealloc)
 	} else {
-		// heuristic: average 8 chars per entry + separators
-		b.Grow(len(items) * (8 + len(cfg.Separator)))
+		// conservative heuristic: 12 chars per element + separators
+		b.Grow(len(items) * (12 + len(cfg.Separator)))
 	}
 
 	// ------------------------------------------------------------
@@ -95,8 +81,8 @@ func FormatStringSlice(
 
 	first := true
 
-	for i, s := range items {
-		if cfg.SkipIf != nil && cfg.SkipIf(i, s) {
+	for i, v := range items {
+		if cfg.SkipIf != nil && cfg.SkipIf(i, v) {
 			continue
 		}
 
@@ -118,12 +104,10 @@ func FormatStringSlice(
 		// Element formatting
 		// --------------------------------------------------------
 
-		if cfg.FormatItem != nil {
-			s = cfg.FormatItem(i, s)
-		}
+		s := cfg.FormatItem(i, v)
 
 		if cfg.Escape != nil {
-			s = cfg.Escape(s)
+			s = cfg.Escape(v)
 		}
 
 		if cfg.Quote {
