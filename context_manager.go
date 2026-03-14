@@ -34,3 +34,11 @@ func WithLock(lock *sync.Mutex, fn func()) {
 	fn()
 	lock.Unlock()
 }
+
+// WithRWLock executes a function while the lock is locked.
+// It automatically unlocks after the function is complete.
+func WithRWLock(lock *sync.RWMutex, fn func()) {
+	lock.Lock()
+	fn()
+	lock.Unlock()
+}
