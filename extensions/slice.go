@@ -116,7 +116,7 @@ Example:
 	})
 	// → [1 3]
 */
-func RemoveWhere[T any](s []T, pred func(T) bool) []T {
+func RemoveWhere[T any](s []T, pred func(T) bool) ([]T, int) {
 	keepCount := 0
 	for _, v := range s {
 		if !pred(v) {
@@ -124,23 +124,24 @@ func RemoveWhere[T any](s []T, pred func(T) bool) []T {
 		}
 	}
 
+	deletedCount := len(s) - keepCount
+
 	if keepCount == len(s) {
-		return slices.Clone(s)
+		return slices.Clone(s), 0
 	}
 
 	if keepCount == 0 {
-		return []T{}
+		return []T{}, deletedCount
 	}
 
 	result := make([]T, 0, keepCount)
-
 	for _, v := range s {
 		if !pred(v) {
 			result = append(result, v)
 		}
 	}
 
-	return result
+	return result, deletedCount
 }
 
 /*
@@ -148,7 +149,7 @@ RemoveWhereInPlace compacts s in place and returns the kept prefix.
 
 This mutates the original slice and performs zero allocations.
 */
-func RemoveWhereInPlace[T any](s []T, pred func(T) bool) []T {
+func RemoveWhereInPlace[T any](s []T, pred func(T) bool) ([]T, int) {
 	write := 0
 	for _, v := range s {
 		if !pred(v) {
@@ -156,7 +157,7 @@ func RemoveWhereInPlace[T any](s []T, pred func(T) bool) []T {
 			write++
 		}
 	}
-	return s[:write]
+	return s[:write], len(s) - write
 }
 
 /*

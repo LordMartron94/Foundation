@@ -201,6 +201,46 @@ func DirCreate(path string) error {
 }
 
 /*
+PathResolveWorkspace resolves a target path relative to the current working directory
+or any of its ancestors.
+
+It walks up the directory tree looking for a parent directory that contains
+the required path structure. This allows tools executed from subdirectories
+(like 'go generate') to correctly resolve paths written relative to the repository root.
+
+Fallback: If the path structure cannot be found in any ancestor, it returns
+the path relative to the current working directory.
+*/
+func PathResolveWorkspace(targetPath string) (string, error) {
+	targetPath = filepath.Clean(targetPath)
+	if filepath.IsAbs(targetPath) {
+		return targetPath, nil
+	}
+	cwd, err := os.Getwd()
+	if err != nil {
+		return "", err
+	}
+	for d := cwd; ; d = filepath.Dir(d) {
+		candidate := filepath.Join(d, targetPath)
+		parent := filepath.Dir(candidate)
+
+		// If the parent directory of our target path exists relative to this ancestor,
+		// we have found the correct anchor point (e.g., the repo root).
+		if fi, statErr := os.Stat(parent); statErr == nil && fi.IsDir() {
+			return filepath.Clean(candidate), nil
+		}
+
+		// Stop if we hit the filesystem root
+		if d == filepath.Dir(d) {
+			break
+		}
+	}
+
+	// Fallback
+	return filepath.Join(cwd, targetPath), nil
+}
+
+/*
 ============================================================
 DIRECTORY SCANNING
 ============================================================
