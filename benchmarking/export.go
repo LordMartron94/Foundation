@@ -44,6 +44,13 @@ const EnvAnvilProfileWarmupIterations = "ANVIL_PROFILE_WARMUP_ITERATIONS"
 const EnvAnvilProfileWorkIterations = "ANVIL_PROFILE_WORK_ITERATIONS"
 
 /*
+EnvAnvilCallgrindInstrRegion is set to "1" by Anvil when [profiling.valgrind] callgrind_client_instr_region is true
+and the effective Valgrind tool is callgrind. Benchmark code may use BenchmarkingCallgrindInstrRegionMaybeBegin/End
+around hot paths together with Valgrind --instr-atstart=no.
+*/
+const EnvAnvilCallgrindInstrRegion = "ANVIL_CALLGRIND_INSTR_REGION"
+
+/*
 BenchmarkTelemetryConfig controls optional host and wall-clock telemetry.
 
 Zero value enables cheap probes (load, wall timestamps, CPU MHz) and best-effort
@@ -63,10 +70,10 @@ type BenchmarkTelemetryConfig struct {
 }
 
 type metricExportScratch struct {
-	path      string
-	values    map[string]float64
-	defKind   map[string]benchreport.MetricKind
-	defLabel  map[string]string
+	path       string
+	values     map[string]float64
+	defKind    map[string]benchreport.MetricKind
+	defLabel   map[string]string
 	defCompare map[string]benchreport.CompareSemantics // non-empty overrides DefaultCompareSemantics(kind)
 }
 
