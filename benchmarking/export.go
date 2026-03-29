@@ -18,6 +18,27 @@ When unset, JSON export is disabled and benchmarks behave as before.
 const EnvBenchmarkMetricsJSON = "BENCHMARK_METRICS_JSON"
 
 /*
+EnvBenchmarkTraceOut names the environment variable for runtime/trace output.
+
+When set (e.g. by Anvil observability go_trace), the benchmark timed region is traced to that path.
+*/
+const EnvBenchmarkTraceOut = "BENCHMARK_TRACE_OUT"
+
+/*
+EnvBenchmarkWarmupIterations sets extra untimed iterations before b.ResetTimer() when BenchmarkWithMetricsConfig
+is given a non-nil warmupFn. Ignored when unset or non-positive. Anvil may set this from [benchmarking].warmup_iterations.
+*/
+const EnvBenchmarkWarmupIterations = "BENCHMARK_WARMUP_ITERATIONS"
+
+/*
+EnvAnvilProfileWarmupIterations / EnvAnvilProfileWorkIterations are set by Anvil for TestProfile_* scenarios (fixed
+workloads under Valgrind). Tests read these in plain loops — not via testing.B.
+*/
+const EnvAnvilProfileWarmupIterations = "ANVIL_PROFILE_WARMUP_ITERATIONS"
+
+const EnvAnvilProfileWorkIterations = "ANVIL_PROFILE_WORK_ITERATIONS"
+
+/*
 BenchmarkTelemetryConfig controls optional host and wall-clock telemetry.
 
 Zero value enables cheap probes (load, wall timestamps, CPU MHz) and best-effort
@@ -105,8 +126,8 @@ when BENCHMARK_METRICS_JSON is set (inside BenchmarkWithMetricsConfig).
 Use this instead of b.ReportMetric for custom metrics so Anvil receives explicit kinds.
 
 Prerequisites:
-- b must be the same *testing.B passed to BenchmarkWithMetricsConfig (or its sub-bench
-  during nested b.Run — only the outer registration is supported; register is per wrapper b).
+  - b must be the same *testing.B passed to BenchmarkWithMetricsConfig (or its sub-bench
+    during nested b.Run — only the outer registration is supported; register is per wrapper b).
 
 Edge cases:
 - If called outside BenchmarkWithMetricsConfig export registration, behaves like b.ReportMetric only.

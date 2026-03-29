@@ -6,8 +6,12 @@ import (
 	"foundation/benchreport"
 	"memcore"
 	"os"
+	"path/filepath"
 	"runtime"
 	"runtime/debug"
+	"runtime/trace"
+	"strconv"
+	"strings"
 	"testing"
 	"time"
 )
@@ -35,7 +39,12 @@ type BenchmarkMetricsConfig struct {
 	FLOPSPerOp float64
 	BytesPerOp float64
 	ItemsPerOp float64
-	Telemetry  BenchmarkTelemetryConfig
+	/*
+		WarmupIterations runs warmupFn that many times after prepare/GC and before b.ResetTimer().
+		When zero, BENCHMARK_WARMUP_ITERATIONS may still supply a positive count. Warmup is skipped when warmupFn is nil.
+	*/
+	WarmupIterations int
+	Telemetry        BenchmarkTelemetryConfig
 }
 
 // -----------------------------------------------------------------------------
@@ -51,11 +60,14 @@ It wraps the standard benchmark execution with:
 3. Reporting of GC, Heap, and Allocation metrics.
 4. Reporting of Throughput (ops/sec), FLOPS (flops/sec), and Bandwidth (manual.bytes/op).
 5. Optional JSONL export when BENCHMARK_METRICS_JSON is set.
+6. Optional runtime/trace when BENCHMARK_TRACE_OUT is set.
+7. Optional warmupFn iterations (config.WarmupIterations or BENCHMARK_WARMUP_ITERATIONS) before the timed region.
 */
 func BenchmarkWithMetricsConfig[data any](
 	b *testing.B,
 	config BenchmarkMetricsConfig,
 	prepareFn func(b *testing.B) data,
+	warmupFn func(data data),
 	benchmarkFn func(data data, b *testing.B),
 	cleanupFn func(data data, b *testing.B),
 ) {
@@ -90,6 +102,20 @@ func BenchmarkWithMetricsConfig[data any](
 	debug.FreeOSMemory()
 	runtime.GC()
 
+	warmN := config.WarmupIterations
+	if warmN <= 0 {
+		if v := strings.TrimSpace(os.Getenv(EnvBenchmarkWarmupIterations)); v != "" {
+			if x, err := strconv.Atoi(v); err == nil && x > 0 {
+				warmN = x
+			}
+		}
+	}
+	if warmN > 0 && warmupFn != nil {
+		for i := 0; i < warmN; i++ {
+			warmupFn(preparedData)
+		}
+	}
+
 	var panicValue any
 	var panicStack []byte
 
@@ -108,6 +134,20 @@ func BenchmarkWithMetricsConfig[data any](
 		benchhost.BenchhostHWCounterResetEnable(hwSess)
 	}
 
+	tracePath := os.Getenv(EnvBenchmarkTraceOut)
+	var traceFile *os.File
+	traceOn := false
+	if tracePath != "" {
+		if err := os.MkdirAll(filepath.Dir(tracePath), 0755); err == nil {
+			traceFile, _ = os.Create(tracePath)
+		}
+		if traceFile != nil {
+			if err := trace.Start(traceFile); err == nil {
+				traceOn = true
+			}
+		}
+	}
+
 	func() {
 		defer func() {
 			if r := recover(); r != nil {
@@ -117,6 +157,13 @@ func BenchmarkWithMetricsConfig[data any](
 		}()
 		benchmarkFn(preparedData, b)
 	}()
+
+	if traceOn {
+		trace.Stop()
+	}
+	if traceFile != nil {
+		_ = traceFile.Close()
+	}
 
 	var hwCycles, hwIns, hwMiss uint64
 	hwReadOK := false
@@ -224,7 +271,7 @@ func BenchmarkWithMetrics[data any](
 	benchmarkFn func(data data, b *testing.B),
 	cleanupFn func(data data, b *testing.B),
 ) {
-	BenchmarkWithMetricsConfig(b, BenchmarkMetricsConfig{}, prepareFn, benchmarkFn, cleanupFn)
+	BenchmarkWithMetricsConfig(b, BenchmarkMetricsConfig{}, prepareFn, nil, benchmarkFn, cleanupFn)
 }
 
 // -----------------------------------------------------------------------------
