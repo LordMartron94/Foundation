@@ -59,7 +59,7 @@ It wraps the standard benchmark execution with:
 2. Panic recovery.
 3. Reporting of GC, Heap, and Allocation metrics.
 4. Reporting of Throughput (ops/sec), FLOPS (flops/sec), and Bandwidth (manual.bytes/op).
-5. Optional JSONL export when BENCHMARK_METRICS_JSON is set.
+5. Optional JSONL export when BENCHMARK_RESULT_JSON (or legacy BENCHMARK_METRICS_JSON) is set.
 6. Optional runtime/trace when BENCHMARK_TRACE_OUT is set.
 7. Optional warmupFn iterations (config.WarmupIterations or BENCHMARK_WARMUP_ITERATIONS) before the timed region.
 */
@@ -205,11 +205,11 @@ func BenchmarkWithMetricsConfig[data any](
 
 	if path != "" && b.N > 0 {
 		if d := b.Elapsed(); d > 0 {
-			exportAddSynthetic(scratch, float64(d.Nanoseconds())/float64(b.N), "ns/op", benchreport.MetricKindDurationNS)
+			exportAddSynthetic(scratch, float64(d.Nanoseconds())/float64(b.N), "ns/op", benchreport.MetricKindDurationNS, "")
 		}
-		exportAddSynthetic(scratch, float64(after.Mallocs-before.Mallocs)/float64(b.N), "allocs/op", benchreport.MetricKindCount)
+		exportAddSynthetic(scratch, float64(after.Mallocs-before.Mallocs)/float64(b.N), "allocs/op", benchreport.MetricKindCount, "")
 		bAlloc := int64(after.TotalAlloc) - int64(before.TotalAlloc)
-		exportAddSynthetic(scratch, float64(bAlloc)/float64(b.N), "B/op", benchreport.MetricKindBytes)
+		exportAddSynthetic(scratch, float64(bAlloc)/float64(b.N), "B/op", benchreport.MetricKindBytes, "")
 	}
 
 	exportFlush(path, b, scratch, config.Telemetry, wallStart, wallEnd, hwCycles, hwIns, hwMiss, hwReadOK, hwStatus)
@@ -318,24 +318,24 @@ func reportStandardMetrics(b *testing.B, before, after runtime.MemStats, scratch
 	mallocsDelta := float64(int64(after.Mallocs) - int64(before.Mallocs))
 	heapObjectsDelta := float64(int64(after.HeapObjects) - int64(before.HeapObjects))
 
-	exportAccumulateMetric(b, scratch, gcCount, "gc.count", benchreport.MetricKindCount)
-	exportAccumulateMetric(b, scratch, heapDelta, "heap.delta.bytes", benchreport.MetricKindBytes)
-	exportAccumulateMetric(b, scratch, totalAllocDelta, "heap.total.alloc.bytes", benchreport.MetricKindBytes)
-	exportAccumulateMetric(b, scratch, float64(after.HeapInuse), "heap.inuse.bytes", benchreport.MetricKindBytes)
-	exportAccumulateMetric(b, scratch, heapObjectsDelta, "heap.objects", benchreport.MetricKindCount)
-	exportAccumulateMetric(b, scratch, float64(after.Sys), "sys.bytes", benchreport.MetricKindBytes)
+	exportAccumulateMetric(b, scratch, gcCount, "gc.count", benchreport.MetricKindCount, "")
+	exportAccumulateMetric(b, scratch, heapDelta, "heap.delta.bytes", benchreport.MetricKindBytes, "")
+	exportAccumulateMetric(b, scratch, totalAllocDelta, "heap.total.alloc.bytes", benchreport.MetricKindBytes, "")
+	exportAccumulateMetric(b, scratch, float64(after.HeapInuse), "heap.inuse.bytes", benchreport.MetricKindBytes, "")
+	exportAccumulateMetric(b, scratch, heapObjectsDelta, "heap.objects", benchreport.MetricKindCount, "")
+	exportAccumulateMetric(b, scratch, float64(after.Sys), "sys.bytes", benchreport.MetricKindBytes, "")
 
 	if b.N > 0 {
-		exportAccumulateMetric(b, scratch, gcCount/float64(b.N), "gc.per.op", benchreport.MetricKindScalar)
-		exportAccumulateMetric(b, scratch, mallocsDelta/float64(b.N), "mallocs.per.op", benchreport.MetricKindScalar)
+		exportAccumulateMetric(b, scratch, gcCount/float64(b.N), "gc.per.op", benchreport.MetricKindScalar, "")
+		exportAccumulateMetric(b, scratch, mallocsDelta/float64(b.N), "mallocs.per.op", benchreport.MetricKindScalar, "")
 		if gcCount > 0 {
-			exportAccumulateMetric(b, scratch, totalPauses/gcCount, "ns/op.gc.pause.avg", benchreport.MetricKindDurationNS)
+			exportAccumulateMetric(b, scratch, totalPauses/gcCount, "ns/op.gc.pause.avg", benchreport.MetricKindDurationNS, "")
 		}
-		exportAccumulateMetric(b, scratch, totalPauses/float64(b.N), "ns/op.gc.pause", benchreport.MetricKindDurationNS)
+		exportAccumulateMetric(b, scratch, totalPauses/float64(b.N), "ns/op.gc.pause", benchreport.MetricKindDurationNS, "")
 	}
 
 	if b.Elapsed().Seconds() > 0 {
-		exportAccumulateMetric(b, scratch, float64(b.N)/b.Elapsed().Seconds(), "ops/sec", benchreport.MetricKindRatePerSec)
+		exportAccumulateMetric(b, scratch, float64(b.N)/b.Elapsed().Seconds(), "ops/sec", benchreport.MetricKindRatePerSec, "")
 	}
 }
 
@@ -347,15 +347,15 @@ func reportThroughputMetrics(b *testing.B, config BenchmarkMetricsConfig, scratc
 	opsPerSec := float64(b.N) / b.Elapsed().Seconds()
 
 	if config.FLOPSPerOp > 0 {
-		exportAccumulateMetric(b, scratch, config.FLOPSPerOp*opsPerSec, "flops/sec", benchreport.MetricKindRatePerSec)
+		exportAccumulateMetric(b, scratch, config.FLOPSPerOp*opsPerSec, "flops/sec", benchreport.MetricKindRatePerSec, "")
 	}
 
 	if config.BytesPerOp > 0 {
-		exportAccumulateMetric(b, scratch, config.BytesPerOp, "manual.bytes/op", benchreport.MetricKindBytes)
+		exportAccumulateMetric(b, scratch, config.BytesPerOp, "manual.bytes/op", benchreport.MetricKindBytes, "")
 	}
 
 	if config.ItemsPerOp > 0 {
-		exportAccumulateMetric(b, scratch, config.ItemsPerOp, "items/op", benchreport.MetricKindCount)
+		exportAccumulateMetric(b, scratch, config.ItemsPerOp, "items/op", benchreport.MetricKindCount, "")
 	}
 }
 

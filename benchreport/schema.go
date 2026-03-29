@@ -39,10 +39,11 @@ Use cases:
 - Streaming new canonical keys before first sample that references them.
 */
 type BenchreportMetricDefinition struct {
-	Type          string     `json:"type"`
-	CanonicalKey  string     `json:"canonical_key"`
-	ReportLabel   string     `json:"report_label,omitempty"`
-	Kind          MetricKind `json:"kind"`
+	Type             string           `json:"type"`
+	CanonicalKey     string           `json:"canonical_key"`
+	ReportLabel      string           `json:"report_label,omitempty"`
+	Kind             MetricKind       `json:"kind"`
+	CompareSemantics CompareSemantics `json:"compare_semantics,omitempty"`
 }
 
 /*
@@ -98,7 +99,19 @@ type BenchreportSample struct {
 }
 
 const (
+	BenchreportRecordTypeRun         = "run"
 	BenchreportRecordTypeHeader      = "header"
 	BenchreportRecordTypeDefinition  = "definition"
 	BenchreportRecordTypeSample      = "sample"
 )
+
+/*
+BenchreportSchemaVersionRunEnvelope is the schema version written for new result streams.
+
+Use cases:
+- Consumers detect JSON-only / run-open semantics (type run, definitions, samples).
+
+Edge cases:
+- Legacy files may use type header and schema_version 1; readers should accept both.
+*/
+const BenchreportSchemaVersionRunEnvelope = 2

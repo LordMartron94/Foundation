@@ -41,7 +41,10 @@ func BenchreportWriteHeader(path string, hdr *BenchreportHeader) error {
 	if st.headerWritten {
 		return nil
 	}
-	hdr.Type = BenchreportRecordTypeHeader
+	hdr.Type = BenchreportRecordTypeRun
+	if hdr.SchemaVersion == 0 {
+		hdr.SchemaVersion = BenchreportSchemaVersionRunEnvelope
+	}
 	line, err := json.Marshal(hdr)
 	if err != nil {
 		return err
@@ -77,7 +80,7 @@ func BenchreportAppendDefinition(path string, def *BenchreportMetricDefinition) 
 BenchreportAppendSample writes one sample record.
 
 Prerequisites:
-- Header should already be written for the same path (call BenchreportWriteHeader first).
+- Opening run record should already be written (BenchreportWriteHeader).
 */
 func BenchreportAppendSample(path string, sample *BenchreportSample) error {
 	if path == "" || sample == nil {

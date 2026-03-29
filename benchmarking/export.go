@@ -11,9 +11,14 @@ import (
 )
 
 /*
-EnvBenchmarkMetricsJSON names the environment variable pointing at the NDJSON sidecar path.
+EnvBenchmarkResultJSON names the environment variable pointing at the authoritative NDJSON result path.
 
-When unset, JSON export is disabled and benchmarks behave as before.
+When unset, export checks EnvBenchmarkMetricsJSON for backward compatibility.
+*/
+const EnvBenchmarkResultJSON = "BENCHMARK_RESULT_JSON"
+
+/*
+EnvBenchmarkMetricsJSON is deprecated; use EnvBenchmarkResultJSON. Same file role.
 */
 const EnvBenchmarkMetricsJSON = "BENCHMARK_METRICS_JSON"
 
@@ -58,10 +63,11 @@ type BenchmarkTelemetryConfig struct {
 }
 
 type metricExportScratch struct {
-	path     string
-	values   map[string]float64
-	defKind  map[string]benchreport.MetricKind
-	defLabel map[string]string
+	path      string
+	values    map[string]float64
+	defKind   map[string]benchreport.MetricKind
+	defLabel  map[string]string
+	defCompare map[string]benchreport.CompareSemantics // non-empty overrides DefaultCompareSemantics(kind)
 }
 
 var exportRegistry struct {
@@ -74,6 +80,9 @@ var exportDefSeen sync.Map // key path+\x00+canonical -> struct{}
 var exportHeaderOnce sync.Map // path -> *sync.Once
 
 func exportPath() string {
+	if p := os.Getenv(EnvBenchmarkResultJSON); p != "" {
+		return p
+	}
 	return os.Getenv(EnvBenchmarkMetricsJSON)
 }
 
@@ -121,7 +130,7 @@ func newMetricExportScratch(path string) *metricExportScratch {
 
 /*
 BenchmarkingReportMetric reports a metric to testing.B and records it for JSON export
-when BENCHMARK_METRICS_JSON is set (inside BenchmarkWithMetricsConfig).
+when BENCHMARK_RESULT_JSON or BENCHMARK_METRICS_JSON is set (inside BenchmarkWithMetricsConfig).
 
 Use this instead of b.ReportMetric for custom metrics so Anvil receives explicit kinds.
 
@@ -134,12 +143,24 @@ Edge cases:
 */
 func BenchmarkingReportMetric(b *testing.B, value float64, reportLabel string, kind benchreport.MetricKind) {
 	scratch := exportLookupScratch(b)
-	exportAccumulateMetric(b, scratch, value, reportLabel, kind)
+	exportAccumulateMetric(b, scratch, value, reportLabel, kind, "")
 }
 
-func exportAccumulateMetric(b *testing.B, scratch *metricExportScratch, value float64, reportLabel string, kind benchreport.MetricKind) {
+/*
+BenchmarkingReportMetricWithCompare is like BenchmarkingReportMetric but sets compare semantics
+explicitly when kind defaults are wrong (e.g. a ratio where higher is better).
+
+Edge cases:
+- Pass empty compare to derive semantics from kind (same as BenchmarkingReportMetric).
+*/
+func BenchmarkingReportMetricWithCompare(b *testing.B, value float64, reportLabel string, kind benchreport.MetricKind, compare benchreport.CompareSemantics) {
+	scratch := exportLookupScratch(b)
+	exportAccumulateMetric(b, scratch, value, reportLabel, kind, compare)
+}
+
+func exportAccumulateMetric(b *testing.B, scratch *metricExportScratch, value float64, reportLabel string, kind benchreport.MetricKind, compareOverride benchreport.CompareSemantics) {
 	b.ReportMetric(value, reportLabel)
-	exportAddSynthetic(scratch, value, reportLabel, kind)
+	exportAddSynthetic(scratch, value, reportLabel, kind, compareOverride)
 }
 
 /*
@@ -148,7 +169,7 @@ exportAddSynthetic records a metric for JSON export only (no b.ReportMetric).
 Use cases:
 - Primary ns/op and mem lines emitted by the testing package, mirrored into the sidecar.
 */
-func exportAddSynthetic(scratch *metricExportScratch, value float64, reportLabel string, kind benchreport.MetricKind) {
+func exportAddSynthetic(scratch *metricExportScratch, value float64, reportLabel string, kind benchreport.MetricKind, compareOverride benchreport.CompareSemantics) {
 	if scratch == nil || scratch.path == "" || scratch.values == nil {
 		return
 	}
@@ -156,6 +177,12 @@ func exportAddSynthetic(scratch *metricExportScratch, value float64, reportLabel
 	scratch.values[canonical] = value
 	scratch.defKind[canonical] = kind
 	scratch.defLabel[canonical] = reportLabel
+	if compareOverride != "" {
+		if scratch.defCompare == nil {
+			scratch.defCompare = make(map[string]benchreport.CompareSemantics)
+		}
+		scratch.defCompare[canonical] = compareOverride
+	}
 }
 
 func exportEnsureHeader(path string, telemetry BenchmarkTelemetryConfig, hwCountersStatus string) {
@@ -186,7 +213,7 @@ func exportEnsureHeader(path string, telemetry BenchmarkTelemetryConfig, hwCount
 			}
 		}
 		hdr := &benchreport.BenchreportHeader{
-			SchemaVersion:    1,
+			SchemaVersion:    benchreport.BenchreportSchemaVersionRunEnvelope,
 			Formatting:       &benchreport.BenchreportFormatting{NumberStyle: "compact"},
 			Environment:      env,
 			HWCountersStatus: hwCountersStatus,
@@ -195,7 +222,7 @@ func exportEnsureHeader(path string, telemetry BenchmarkTelemetryConfig, hwCount
 	})
 }
 
-func exportAppendDefinitionOnce(path, canonical, reportLabel string, kind benchreport.MetricKind) {
+func exportAppendDefinitionOnce(path, canonical, reportLabel string, kind benchreport.MetricKind, compareOverride benchreport.CompareSemantics) {
 	if path == "" || canonical == "" {
 		return
 	}
@@ -203,10 +230,12 @@ func exportAppendDefinitionOnce(path, canonical, reportLabel string, kind benchr
 	if _, loaded := exportDefSeen.LoadOrStore(key, struct{}{}); loaded {
 		return
 	}
+	sem := benchreport.CompareSemanticsResolve(compareOverride, kind)
 	_ = benchreport.BenchreportAppendDefinition(path, &benchreport.BenchreportMetricDefinition{
-		CanonicalKey: canonical,
-		ReportLabel:  reportLabel,
-		Kind:         kind,
+		CanonicalKey:     canonical,
+		ReportLabel:      reportLabel,
+		Kind:             kind,
+		CompareSemantics: sem,
 	})
 }
 
@@ -281,7 +310,11 @@ func exportFlush(
 	}
 
 	for canonical, kind := range kinds {
-		exportAppendDefinitionOnce(path, canonical, labels[canonical], kind)
+		var override benchreport.CompareSemantics
+		if scratch.defCompare != nil {
+			override = scratch.defCompare[canonical]
+		}
+		exportAppendDefinitionOnce(path, canonical, labels[canonical], kind, override)
 	}
 
 	sample := &benchreport.BenchreportSample{
