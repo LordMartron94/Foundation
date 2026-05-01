@@ -7,6 +7,23 @@ import (
 )
 
 /*
+StringToBytes converts a string into a newly allocated byte slice.
+
+The resulting slice does not alias the original string memory and can be
+modified safely by the caller.
+
+Time Complexity: O(n), where n is the length of the input string.
+Space Complexity: O(n) for the returned byte slice.
+*/
+func StringToBytes(value string) []byte {
+	if len(value) == 0 {
+		return nil
+	}
+
+	return []byte(value)
+}
+
+/*
 StringSliceToBytes converts a slice of strings into a single byte slice.
 Each string is appended to the result, followed by a provided terminator.
 to allow for unambiguous reconstruction of the original slice.

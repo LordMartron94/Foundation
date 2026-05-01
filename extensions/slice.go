@@ -212,6 +212,48 @@ func IndexOfFunc[T any](s []T, pred func(T) bool) int {
 	return -1
 }
 
+/*
+Equal reports whether a and b have the same length and equal elements
+at every index.
+
+Two nil slices are equal.
+A nil slice and an empty (non-nil) slice are not equal.
+*/
+func Equal[T comparable](a []T, b []T) bool {
+	if len(a) != len(b) {
+		return false
+	}
+
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+
+	return true
+}
+
+/*
+EqualFunc reports whether a and b have the same length and all element pairs
+compare equal under eq.
+
+Two nil slices are equal.
+A nil slice and an empty (non-nil) slice are not equal.
+*/
+func EqualFunc[T any](a []T, b []T, eq func(a, b T) bool) bool {
+	if len(a) != len(b) {
+		return false
+	}
+
+	for i := range a {
+		if !eq(a[i], b[i]) {
+			return false
+		}
+	}
+
+	return true
+}
+
 // ============================================================
 // SORTING HELPERS
 // ============================================================

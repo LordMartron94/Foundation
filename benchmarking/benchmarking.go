@@ -2,11 +2,18 @@ package benchmarking
 
 import (
 	"fmt"
+	"foundation/benchhost"
+	"foundation/benchreport"
 	"memcore"
 	"os"
+	"path/filepath"
 	"runtime"
 	"runtime/debug"
+	"runtime/trace"
+	"strconv"
+	"strings"
 	"testing"
+	"time"
 )
 
 // -----------------------------------------------------------------------------
@@ -20,16 +27,24 @@ Use cases:
 - Configuring FLOPS reporting for computational benchmarks
 - Specifying manual memory bytes per operation for accurate memory throughput
 - Specifying items processed per operation
+- Telemetry controls JSON sidecar host/wall/HW context (see BenchmarkTelemetryConfig)
 
 Fields:
 - FLOPSPerOp: Floating point operations per benchmark operation.
 - BytesPerOp: Manual memory bytes accessed per operation (for bandwidth calculation).
 - ItemsPerOp: Logical items processed per operation.
+- Telemetry: Host and wall-clock export options (zero value = defaults-on).
 */
 type BenchmarkMetricsConfig struct {
 	FLOPSPerOp float64
 	BytesPerOp float64
 	ItemsPerOp float64
+	/*
+		WarmupIterations runs warmupFn that many times after prepare/GC and before b.ResetTimer().
+		When zero, BENCHMARK_WARMUP_ITERATIONS may still supply a positive count. Warmup is skipped when warmupFn is nil.
+	*/
+	WarmupIterations int
+	Telemetry        BenchmarkTelemetryConfig
 }
 
 // -----------------------------------------------------------------------------
@@ -44,16 +59,41 @@ It wraps the standard benchmark execution with:
 2. Panic recovery.
 3. Reporting of GC, Heap, and Allocation metrics.
 4. Reporting of Throughput (ops/sec), FLOPS (flops/sec), and Bandwidth (manual.bytes/op).
+5. Optional JSONL export when BENCHMARK_RESULT_JSON (or legacy BENCHMARK_METRICS_JSON) is set.
+6. Optional runtime/trace when BENCHMARK_TRACE_OUT is set.
+7. Optional warmupFn iterations (config.WarmupIterations or BENCHMARK_WARMUP_ITERATIONS) before the timed region.
 */
 func BenchmarkWithMetricsConfig[data any](
 	b *testing.B,
 	config BenchmarkMetricsConfig,
 	prepareFn func(b *testing.B) data,
+	warmupFn func(data data),
 	benchmarkFn func(data data, b *testing.B),
 	cleanupFn func(data data, b *testing.B),
 ) {
 	name := b.Name()
 	fmt.Fprintf(os.Stderr, "🔹 Running %s...\n", name)
+
+	path := exportPath()
+	scratch := newMetricExportScratch(path)
+	exportRegisterScratch(b, scratch)
+	defer exportUnregisterScratch(b)
+
+	var hwStatus string
+	var hwSess *benchhost.BenchhostHWCounterSession
+	if path != "" {
+		if config.Telemetry.OmitHWCounters {
+			hwStatus = "omitted"
+		} else {
+			var msg string
+			hwSess, msg = benchhost.BenchhostHWCounterOpen()
+			if hwSess == nil {
+				hwStatus = msg
+			} else {
+				hwStatus = "ok"
+			}
+		}
+	}
 
 	// 1. Preparation
 	preparedData := prepareFn(b)
@@ -62,14 +102,51 @@ func BenchmarkWithMetricsConfig[data any](
 	debug.FreeOSMemory()
 	runtime.GC()
 
+	warmN := config.WarmupIterations
+	if warmN <= 0 {
+		if v := strings.TrimSpace(os.Getenv(EnvBenchmarkWarmupIterations)); v != "" {
+			if x, err := strconv.Atoi(v); err == nil && x > 0 {
+				warmN = x
+			}
+		}
+	}
+	if warmN > 0 && warmupFn != nil {
+		for i := 0; i < warmN; i++ {
+			warmupFn(preparedData)
+		}
+	}
+
 	var panicValue any
 	var panicStack []byte
 
 	var before, after runtime.MemStats
 
+	var wallStart, wallEnd time.Time
+	if path != "" && !config.Telemetry.OmitWallTimestamps {
+		wallStart = time.Now()
+	}
+
 	// 2. Execution
 	b.ResetTimer()
 	runtime.ReadMemStats(&before)
+
+	if hwSess != nil {
+		benchhost.BenchhostHWCounterResetEnable(hwSess)
+	}
+
+	tracePath := os.Getenv(EnvBenchmarkTraceOut)
+	var traceFile *os.File
+	traceOn := false
+	if tracePath != "" {
+		if err := os.MkdirAll(filepath.Dir(tracePath), 0755); err == nil {
+			traceFile, _ = os.Create(tracePath)
+		}
+		if traceFile != nil {
+			if err := trace.Start(traceFile); err == nil {
+				traceOn = true
+			}
+		}
+	}
 
 	func() {
 		defer func() {
@@ -81,7 +158,27 @@ func BenchmarkWithMetricsConfig[data any](
 		benchmarkFn(preparedData, b)
 	}()
 
+	if traceOn {
+		trace.Stop()
+	}
+	if traceFile != nil {
+		_ = traceFile.Close()
+	}
+
+	var hwCycles, hwIns, hwMiss uint64
+	hwReadOK := false
+	if hwSess != nil {
+		hwCycles, hwIns, hwMiss, hwReadOK = benchhost.BenchhostHWCounterDisableRead(hwSess)
+	}
+	benchhost.BenchhostHWCounterClose(hwSess)
+	hwSess = nil
+
 	b.StopTimer()
+
+	if path != "" && !config.Telemetry.OmitWallTimestamps {
+		wallEnd = time.Now()
+	}
+
 	runtime.ReadMemStats(&after)
 
 	// 3. Cleanup
@@ -103,8 +200,19 @@ func BenchmarkWithMetricsConfig[data any](
 	}
 
 	// 5. Metric Reporting
-	reportStandardMetrics(b, before, after)
-	reportThroughputMetrics(b, config)
+	reportStandardMetrics(b, before, after, scratch)
+	reportThroughputMetrics(b, config, scratch)
+
+	if path != "" && b.N > 0 {
+		if d := b.Elapsed(); d > 0 {
+			exportAddSynthetic(scratch, float64(d.Nanoseconds())/float64(b.N), "ns/op", benchreport.MetricKindDurationNS, "")
+		}
+		exportAddSynthetic(scratch, float64(after.Mallocs-before.Mallocs)/float64(b.N), "allocs/op", benchreport.MetricKindCount, "")
+		bAlloc := int64(after.TotalAlloc) - int64(before.TotalAlloc)
+		exportAddSynthetic(scratch, float64(bAlloc)/float64(b.N), "B/op", benchreport.MetricKindBytes, "")
+	}
+
+	exportFlush(path, b, scratch, config.Telemetry, wallStart, wallEnd, hwCycles, hwIns, hwMiss, hwReadOK, hwStatus)
 
 	fmt.Fprintf(os.Stderr, "✅ Finished %s\n", name)
 }
@@ -163,7 +271,7 @@ func BenchmarkWithMetrics[data any](
 	benchmarkFn func(data data, b *testing.B),
 	cleanupFn func(data data, b *testing.B),
 ) {
-	BenchmarkWithMetricsConfig(b, BenchmarkMetricsConfig{}, prepareFn, benchmarkFn, cleanupFn)
+	BenchmarkWithMetricsConfig(b, BenchmarkMetricsConfig{}, prepareFn, nil, benchmarkFn, cleanupFn)
 }
 
 // -----------------------------------------------------------------------------
@@ -202,7 +310,7 @@ func RunBatchedBenchmark(b *testing.B, workFn func(i int), maxHeapGrowth, maxHea
 // Internal Reporting Helpers
 // -----------------------------------------------------------------------------
 
-func reportStandardMetrics(b *testing.B, before, after runtime.MemStats) {
+func reportStandardMetrics(b *testing.B, before, after runtime.MemStats, scratch *metricExportScratch) {
 	gcCount := float64(after.NumGC - before.NumGC)
 	heapDelta := float64(int64(after.HeapAlloc) - int64(before.HeapAlloc))
 	totalPauses := float64(after.PauseTotalNs - before.PauseTotalNs)
@@ -210,28 +318,28 @@ func reportStandardMetrics(b *testing.B, before, after runtime.MemStats) {
 	mallocsDelta := float64(int64(after.Mallocs) - int64(before.Mallocs))
 	heapObjectsDelta := float64(int64(after.HeapObjects) - int64(before.HeapObjects))
 
-	b.ReportMetric(gcCount, "gc.count")
-	b.ReportMetric(heapDelta, "heap.delta.bytes")
-	b.ReportMetric(totalAllocDelta, "heap.total.alloc.bytes")
-	b.ReportMetric(float64(after.HeapInuse), "heap.inuse.bytes")
-	b.ReportMetric(heapObjectsDelta, "heap.objects")
-	b.ReportMetric(float64(after.Sys), "sys.bytes")
+	exportAccumulateMetric(b, scratch, gcCount, "gc.count", benchreport.MetricKindCount, "")
+	exportAccumulateMetric(b, scratch, heapDelta, "heap.delta.bytes", benchreport.MetricKindBytes, "")
+	exportAccumulateMetric(b, scratch, totalAllocDelta, "heap.total.alloc.bytes", benchreport.MetricKindBytes, "")
+	exportAccumulateMetric(b, scratch, float64(after.HeapInuse), "heap.inuse.bytes", benchreport.MetricKindBytes, "")
+	exportAccumulateMetric(b, scratch, heapObjectsDelta, "heap.objects", benchreport.MetricKindCount, "")
+	exportAccumulateMetric(b, scratch, float64(after.Sys), "sys.bytes", benchreport.MetricKindBytes, "")
 
 	if b.N > 0 {
-		b.ReportMetric(gcCount/float64(b.N), "gc.per.op")
-		b.ReportMetric(mallocsDelta/float64(b.N), "mallocs.per.op")
+		exportAccumulateMetric(b, scratch, gcCount/float64(b.N), "gc.per.op", benchreport.MetricKindScalar, "")
+		exportAccumulateMetric(b, scratch, mallocsDelta/float64(b.N), "mallocs.per.op", benchreport.MetricKindScalar, "")
 		if gcCount > 0 {
-			b.ReportMetric(totalPauses/gcCount, "ns/op.gc.pause.avg")
+			exportAccumulateMetric(b, scratch, totalPauses/gcCount, "ns/op.gc.pause.avg", benchreport.MetricKindDurationNS, "")
 		}
-		b.ReportMetric(totalPauses/float64(b.N), "ns/op.gc.pause")
+		exportAccumulateMetric(b, scratch, totalPauses/float64(b.N), "ns/op.gc.pause", benchreport.MetricKindDurationNS, "")
 	}
 
 	if b.Elapsed().Seconds() > 0 {
-		b.ReportMetric(float64(b.N)/b.Elapsed().Seconds(), "ops/sec")
+		exportAccumulateMetric(b, scratch, float64(b.N)/b.Elapsed().Seconds(), "ops/sec", benchreport.MetricKindRatePerSec, "")
 	}
 }
 
-func reportThroughputMetrics(b *testing.B, config BenchmarkMetricsConfig) {
+func reportThroughputMetrics(b *testing.B, config BenchmarkMetricsConfig, scratch *metricExportScratch) {
 	if b.Elapsed().Seconds() <= 0 {
 		return
 	}
@@ -239,15 +347,15 @@ func reportThroughputMetrics(b *testing.B, config BenchmarkMetricsConfig) {
 	opsPerSec := float64(b.N) / b.Elapsed().Seconds()
 
 	if config.FLOPSPerOp > 0 {
-		b.ReportMetric(config.FLOPSPerOp*opsPerSec, "flops/sec")
+		exportAccumulateMetric(b, scratch, config.FLOPSPerOp*opsPerSec, "flops/sec", benchreport.MetricKindRatePerSec, "")
 	}
 
 	if config.BytesPerOp > 0 {
-		b.ReportMetric(config.BytesPerOp, "manual.bytes/op")
+		exportAccumulateMetric(b, scratch, config.BytesPerOp, "manual.bytes/op", benchreport.MetricKindBytes, "")
 	}
 
 	if config.ItemsPerOp > 0 {
-		b.ReportMetric(config.ItemsPerOp, "items/op")
+		exportAccumulateMetric(b, scratch, config.ItemsPerOp, "items/op", benchreport.MetricKindCount, "")
 	}
 }
 
