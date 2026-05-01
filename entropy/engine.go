@@ -85,6 +85,49 @@ func EntropyProviderCreateMixSplit64(seed uint64) *EntropyProvider {
 }
 
 /*
+EntropyProviderCreateMixSplit128 creates a SplitMix64-backed provider from a
+128-bit seed represented as two 64-bit words.
+
+[Context]
+Some systems maintain seeds as 128-bit tuples (for example composite run id +
+stream id). This constructor accepts that wider seed form directly while
+reusing the SplitMix64 execution core for fast deterministic generation.
+
+[Algorithmic Approach]
+The two seed words are folded into a single 64-bit value via fold128To64, then
+delegated to EntropyProviderCreateMixSplit64. The folding step provides a
+deterministic reduction from 128-bit input space to the 64-bit SplitMix state.
+
+[Use Cases]
+- Pipelines that store seeds as two-word identifiers.
+- Stream partitioning where high/low seed words carry different semantics.
+- Compatibility layers migrating from 128-bit seed APIs to SplitMix64.
+
+[Parameters]
+seedHigh is the upper 64 bits of the input seed.
+seedLow is the lower 64 bits of the input seed.
+
+[Returns]
+A new provider with independent mutable state.
+
+[Side Effects]
+The returned provider mutates only provider-local internal state.
+
+[Edge Cases]
+Different 128-bit seeds can fold to the same 64-bit value; those seeds will
+produce identical output streams after folding.
+
+[Complexity]
+Initialization: O(1)
+Generation: O(1) per value.
+Space: O(1)
+*/
+func EntropyProviderCreateMixSplit128(seedHigh, seedLow uint64) *EntropyProvider {
+	foldedSeed := fold128To64(seedHigh, seedLow)
+	return EntropyProviderCreateMixSplit64(foldedSeed)
+}
+
+/*
 EntropyProviderCreateXoroshiro128 creates a provider backed by xoroshiro128.
 
 [Context]
@@ -623,4 +666,10 @@ func rotateRightU64(val uint64, delta int) uint64 {
 //go:inline
 func rotateRightU32(val uint32, delta int) uint32 {
 	return (val >> delta) | (val << (32 - delta))
+}
+
+//go:nosplit
+//go:inline
+func fold128To64(high, low uint64) uint64 {
+	return high ^ low
 }
