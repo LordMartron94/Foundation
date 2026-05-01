@@ -122,8 +122,8 @@ Initialization: O(1)
 Generation: O(1) per value.
 Space: O(1)
 */
-func EntropyProviderCreateMixSplit128(seedHigh, seedLow uint64) *EntropyProvider {
-	foldedSeed := fold128To64(seedHigh, seedLow)
+func EntropyProviderCreateMixSplit128(seed foundation.Uint128) *EntropyProvider {
+	foldedSeed := fold128To64(seed)
 	return EntropyProviderCreateMixSplit64(foldedSeed)
 }
 
@@ -670,6 +670,6 @@ func rotateRightU32(val uint32, delta int) uint32 {
 
 //go:nosplit
 //go:inline
-func fold128To64(high, low uint64) uint64 {
-	return high ^ low
+func fold128To64(val foundation.Uint128) uint64 {
+	return val.Hi ^ val.Lo
 }
