@@ -86,7 +86,7 @@ func EntropyProviderCreateMixSplit64(seed uint64) *EntropyProvider {
 
 /*
 EntropyProviderCreateMixSplit128 creates a SplitMix64-backed provider from a
-128-bit seed represented as two 64-bit words.
+128-bit seed.
 
 [Context]
 Some systems maintain seeds as 128-bit tuples (for example composite run id +
@@ -94,7 +94,7 @@ stream id). This constructor accepts that wider seed form directly while
 reusing the SplitMix64 execution core for fast deterministic generation.
 
 [Algorithmic Approach]
-The two seed words are folded into a single 64-bit value via fold128To64, then
+The Uint128 seed is folded into a single 64-bit value via fold128To64, then
 delegated to EntropyProviderCreateMixSplit64. The folding step provides a
 deterministic reduction from 128-bit input space to the 64-bit SplitMix state.
 
@@ -104,8 +104,7 @@ deterministic reduction from 128-bit input space to the 64-bit SplitMix state.
 - Compatibility layers migrating from 128-bit seed APIs to SplitMix64.
 
 [Parameters]
-seedHigh is the upper 64 bits of the input seed.
-seedLow is the lower 64 bits of the input seed.
+seed is the 128-bit input seed.
 
 [Returns]
 A new provider with independent mutable state.
