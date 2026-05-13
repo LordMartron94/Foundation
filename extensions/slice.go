@@ -150,14 +150,19 @@ RemoveWhereInPlace compacts s in place and returns the kept prefix.
 This mutates the original slice and performs zero allocations.
 */
 func RemoveWhereInPlace[T any](s []T, pred func(T) bool) ([]T, int) {
-	write := 0
-	for _, v := range s {
-		if !pred(v) {
-			s[write] = v
-			write++
+	newLen := 0
+	for i := range s {
+		if !pred(s[i]) {
+			s[newLen] = s[i]
+			newLen++
 		}
 	}
-	return s[:write], len(s) - write
+
+	removedCount := len(s) - newLen
+
+	clear(s[newLen:])
+
+	return s[:newLen], removedCount
 }
 
 /*
