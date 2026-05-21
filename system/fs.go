@@ -190,13 +190,17 @@ func PathExt(path string) string {
 DirCreate creates a single directory.
 
 Notes:
-  - Does not create parents (non-recursive)
-  - Mirrors os.Mkdir semantics
+  - Does not create parents (non-recursive) unless all is set to true.
+  - Mirrors os.Mkdir semantics, and os.MkDirall if all is set to true.
 
 Permissions:
   - 0755 (owner full, group+others read/execute)
 */
-func DirCreate(path string) error {
+func DirCreate(path string, all bool) error {
+	if all {
+		return os.MkdirAll(path, 0755)
+	}
+
 	return os.Mkdir(path, 0755)
 }
 
