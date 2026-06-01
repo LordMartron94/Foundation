@@ -162,7 +162,7 @@ func XXH3HasherHash64View[T any](hasher *XXH3Hasher, mark memcore.MarkRaw) uint6
 	return XXH3HasherHash64(hasher, data)
 }
 
-func XXH3HasherHash128(hasher *XXH3Hasher, content []byte) (uint64, uint64) {
+func XXH3HasherHash128(hasher *XXH3Hasher, content []byte) foundation.Uint128 {
 	contentLength := len(content)
 
 	secret := hasher.secret
@@ -172,45 +172,51 @@ func XXH3HasherHash128(hasher *XXH3Hasher, content []byte) (uint64, uint64) {
 
 	switch {
 	case contentLength == 0:
-		return xxh3Hasher128Empty(hasher, secret)
+		lo, hi := xxh3Hasher128Empty(hasher, secret)
+		return foundation.Uint128New(lo, hi)
 	case contentLength < 4:
 		// LSB                      8        16           24                    MSB
 		combined := uint32(content[contentLength-1]) | (uint32(contentLength) << 8) |
 			(uint32(content[0]) << 16) | (uint32(content[contentLength>>1]) << 24)
-		return xxh3Hasher128Length1To3(hasher, combined, secret)
+		lo, hi := xxh3Hasher128Length1To3(hasher, combined, secret)
+		return foundation.Uint128New(lo, hi)
 	case contentLength < 9:
 		inputFirst := littleEndianWordGet[uint32](content, 0)
 		inputLast := littleEndianWordGet[uint32](content, uint64(contentLength-4))
 		modifiedSeed := hasher.seed ^ (uint64(byteSwap32(uint32(hasher.seed))) << 32)
-		return xxh3Hasher128Length4To8(hasher, inputFirst, inputLast, modifiedSeed, uint64(contentLength), secret)
+		lo, hi := xxh3Hasher128Length4To8(hasher, inputFirst, inputLast, modifiedSeed, uint64(contentLength), secret)
+		return foundation.Uint128New(lo, hi)
 	case contentLength < 17:
 		inputFirst := littleEndianWordGet[uint64](content, 0)
 		inputLast := littleEndianWordGet[uint64](content, uint64(contentLength-8))
-		return xxh3Hasher128Length9To16(hasher, inputFirst, inputLast, uint64(contentLength), secret)
+		lo, hi := xxh3Hasher128Length9To16(hasher, inputFirst, inputLast, uint64(contentLength), secret)
+		return foundation.Uint128New(lo, hi)
 	case contentLength < 129:
 		accumulator := &[2]uint64{uint64(contentLength) * prime64_1, 0}
 		xxh3Hasher128Length17To128(hasher, accumulator, content, uint64(contentLength), secret)
 		low := accumulator[0] + accumulator[1]
 		high := (accumulator[0] * prime64_1) + (accumulator[1] * prime64_4) + ((uint64(contentLength) - hasher.seed) * prime64_2)
-		return xxh3HasherAvalanche(low), 0 - xxh3HasherAvalanche(high)
+		return foundation.Uint128New(xxh3HasherAvalanche(low), 0-xxh3HasherAvalanche(high))
 	case contentLength < 241:
 		accumulator := &[2]uint64{uint64(contentLength) * prime64_1, 0}
 		xxh3Hasher128Length129To240(hasher, accumulator, content, uint64(contentLength), secret)
 		low := accumulator[0] + accumulator[1]
 		high := (accumulator[0] * prime64_1) + (accumulator[1] * prime64_4) + ((uint64(contentLength) - hasher.seed) * prime64_2)
-		return xxh3HasherAvalanche(low), 0 - xxh3HasherAvalanche(high)
+		return foundation.Uint128New(xxh3HasherAvalanche(low), 0-xxh3HasherAvalanche(high))
 	default:
 		secretLength := uint64(len(secret))
 		accumulator := xxh3DefaultAccumulator
 
 		xxh3HasherAccumulateAll(hasher, &accumulator, content, uint64(contentLength), secret)
-		return xxh3HasherFinalize(hasher, &accumulator, uint64(contentLength)*prime64_1, 11, secret), xxh3HasherFinalize(hasher, &accumulator, ^(uint64(contentLength) * prime64_2), secretLength-75, secret)
+		lo := xxh3HasherFinalize(hasher, &accumulator, uint64(contentLength)*prime64_1, 11, secret)
+		hi := xxh3HasherFinalize(hasher, &accumulator, ^(uint64(contentLength)*prime64_2), secretLength-75, secret)
+		return foundation.Uint128New(lo, hi)
 	}
 }
 
 //go:nosplit
 //go:inline
-func XXH3HasherHash128View[T any](hasher *XXH3Hasher, mark memcore.MarkRaw) (uint64, uint64) {
+func XXH3HasherHash128View[T any](hasher *XXH3Hasher, mark memcore.MarkRaw) foundation.Uint128 {
 	ptr, length := memcore.MemcoreView[T](mark)
 	data := unsafe.Slice((*byte)(ptr), length)
 	return XXH3HasherHash128(hasher, data)

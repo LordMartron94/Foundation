@@ -3,6 +3,7 @@ package hash
 import (
 	"encoding/binary"
 	"fmt"
+	"foundation"
 	"foundation/benchmarking"
 	"hash/maphash"
 	"testing"
@@ -76,12 +77,12 @@ func runHash128Bench(b *testing.B, size int, seed uint64) {
 			return benchData{h, data}
 		},
 		func(d benchData, b *testing.B) {
-			var lo, hi uint64
+			var digest foundation.Uint128
 			for i := 0; i < b.N; i++ {
-				lo, hi = XXH3HasherHash128(d.hasher, d.data)
+				digest = XXH3HasherHash128(d.hasher, d.data)
 			}
-			if lo == 0 || hi == 0 {
-				b.Logf("dummy: %x, %x", lo, hi)
+			if digest == foundation.Uint128Zero {
+				b.Logf("dummy: %x", digest)
 			}
 		},
 		func(d benchData, b *testing.B) {},
